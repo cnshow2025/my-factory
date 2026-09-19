@@ -47,6 +47,9 @@
   .hotTag{background:var(--down);color:#fff;font-size:10px;padding:1px 5px;border-radius:4px;
           font-weight:700;animation:hotblink 1.4s ease-in-out infinite}
   @keyframes hotblink{0%,100%{opacity:1}50%{opacity:.4}}
+  .size{font-size:10px;padding:0 4px;border-radius:3px;border:1px solid var(--line);color:var(--dim)}
+  .size.L{border-color:#d95926;color:#f0883e}
+  .size.S{border-color:#199e70;color:#3fb950}
   .due{color:var(--dim)}
   .due.warn{color:var(--setup);font-weight:700}
   .due.late{color:var(--down);font-weight:700}
@@ -300,7 +303,11 @@ const DEF = {
   yieldMin:80, yieldMax:99, gate1:99, gate2:98,
   recoverMin:40, recoverMax:80,
   initialLots:6, arrivalEvery:70, arrivalBatch:2,
-  qtyMin:2000, qtyMax:10000, tpuMin:0.8, tpuMax:1.8,
+  mixSmall:60, mixMid:30,
+  qtySmallMin:500, qtySmallMax:2000,
+  qtyMidMin:2000, qtyMidMax:10000,
+  qtyBigMin:10000, qtyBigMax:25000,
+  tpuMin:0.8, tpuMax:1.8,
   utilWeight:0.3,
   pkgTypes:3, progTypes:4, queueMax:4,
   hotRate:18, hotBonus:1.5, latePenalty:5000,
@@ -314,7 +321,10 @@ const LABEL = {
   gate1:["T1 免 retest 門檻","%"], gate2:["RT1 免 RT2 門檻","%"],
   recoverMin:["Retest 救回率下限","%"], recoverMax:["Retest 救回率上限","%"],
   initialLots:["開局貨批數","批"], arrivalEvery:["到貨間隔","分"], arrivalBatch:["每次到貨","批"],
-  qtyMin:["批量下限","顆"], qtyMax:["批量上限","顆"],
+  mixSmall:["小批量占比","%"], mixMid:["中批量占比","%"],
+  qtySmallMin:["小批量下限","顆"], qtySmallMax:["小批量上限","顆"],
+  qtyMidMin:["中批量下限","顆"], qtyMidMax:["中批量上限","顆"],
+  qtyBigMin:["大批量下限","顆"], qtyBigMax:["大批量上限","顆"],
   tpuMin:["單顆測試下限","秒"], tpuMax:["單顆測試上限","秒"],
   utilWeight:["稼動率加權","×"],
   pkgTypes:["封裝種類數","種"], progTypes:["測試程式種類數","種"],
@@ -349,6 +359,7 @@ function applyTypes(){
 }
 
 /* ---------- 工具 ---------- */
+const SIZE_LABEL = { S:"小批", M:"中批", L:"大批" };
 const $ = s => document.querySelector(s);
 // 可重現亂數：同一個種子 → 完全相同的貨批、良率與當機時間點，策略才比得公平
 function mulberry32(a){
@@ -372,18 +383,26 @@ const dueFmt = t => t < DAY ? hhmm(t) : "D+"+Math.floor(t/DAY)+" "+hhmm(t%DAY);
 let S = null, timer = null, acc = 0;
 
 function newLot(arrive){
-  const qty = Math.round(ri(P.qtyMin,P.qtyMax)/500)*500;
+  // 批量級距：小 / 中 / 大，依設定比例抽樣
+  const roll = rng()*100, sMax = P.mixSmall, mMax = P.mixSmall + P.mixMid;
+  const size = roll < sMax ? "S" : roll < mMax ? "M" : "L";
+  const [qLo, qHi] = size === "S" ? [P.qtySmallMin, P.qtySmallMax]
+                   : size === "M" ? [P.qtyMidMin,   P.qtyMidMax]
+                                  : [P.qtyBigMin,   P.qtyBigMax];
+  const step = qHi <= 2000 ? 100 : 500;
+  const qty = Math.max(step, Math.round(ri(qLo, qHi)/step)*step);
   const tpu = +rf(P.tpuMin,P.tpuMax).toFixed(2);
   const ok = runnablePkgs();
   const hot = rng() < P.hotRate/100;
-  // 交期 = 到貨 + 預估工時（T1 再加 30% retest 餘裕）× 寬鬆倍數
-  const est = qty * tpu / 60 * 1.3;
+  // 交期 = 到貨 +（預估工時 + 一次改機）× 寬鬆倍數。
+  // 小批的測試時間可能比一次換 Kit 還短，不把改機算進去的話小批天生就會遲交。
+  const est = qty * tpu / 60 * 1.3 + P.setupPkg;
   const slack = hot ? rf(P.hotSlackMin,P.hotSlackMax) : rf(P.dueSlackMin,P.dueSlackMax);
   const due = Math.round(arrive + est * slack);
   return {
     id:"L"+String(S.seq++).padStart(3,"0"),
     pkg:ok[ri(0,ok.length-1)], prog:PROGS[ri(0,PROGS.length-1)],
-    qty, tpu, baseYield:+rf(P.yieldMin,P.yieldMax).toFixed(1),
+    qty, size, tpu, baseYield:+rf(P.yieldMin,P.yieldMax).toFixed(1),
     arrive, hot, due, state:"WIP", good:0, pending:0, cum:0, rt:0,
     machine:null, late:false, doneAt:null
   };
@@ -661,7 +680,7 @@ function render(){
       <div class="r1"><b>${l.hot?`<span class="hotTag">HOT</span> `:""}${l.id}</b>
         <span><span class="tag pkg${l.pkg}">${l.pkg}</span> <span class="prog">${l.prog}</span></span>
       </div>
-      <div class="r2">${nf(l.qty)} 顆 · ${l.tpu}s/顆 · T1 約 ${phaseMinutes(l,l.qty)} 分</div>
+      <div class="r2"><span class="size ${l.size}">${SIZE_LABEL[l.size]}</span> ${nf(l.qty)} 顆 · ${l.tpu}s/顆 · T1 約 ${phaseMinutes(l,l.qty)} 分</div>
       <div class="r2">交期 ${dueFmt(l.due)} · <span class="due ${d.cls}">${d.txt}</span></div>
     </div>`; }).join("") || `<div style="color:var(--dim);font-size:12px;padding:8px">目前沒有待派工貨批</div>`;
 
@@ -1040,7 +1059,8 @@ const PRESETS = [
     desc:"預設值，貨批短、當機多，五分鐘一局節奏緊湊。",
     P:Object.assign({}, DEF) },
   { id:"myfab", name:"我的工廠（實機參數）",
-    desc:"現場條件：5 台測試機、封裝 5 種、測試程式 8 種、批量 3,000~25,000 顆、單顆 2 秒、" +
+    desc:"現場條件：5 台測試機、封裝 5 種、測試程式 8 種、單顆 2 秒、" +
+         "批量結構 小批 0.5~2k 六成／中批 2~10k 三成／大批 10~25k 一成、" +
          "換 Kit 60 分、換程式 30 分、良率 80~99%、RT 門檻 99/98、一天 24 小時三班。" +
          "當機率 5%/小時、Retest 救回率 60%、HOT 比例 10%、逾期一批扣 20,000 分。",
     P:Object.assign({}, DEF, {
@@ -1050,8 +1070,12 @@ const PRESETS = [
       recoverMin:40, recoverMax:80,
       downPerHour:5, downMin:10, downMax:120,
       recoverMin:60, recoverMax:60,
-      qtyMin:3000, qtyMax:25000, tpuMin:2, tpuMax:2,
-      arrivalEvery:100, arrivalBatch:1, initialLots:5,
+      mixSmall:60, mixMid:30,
+      qtySmallMin:500, qtySmallMax:2000,
+      qtyMidMin:2000, qtyMidMax:10000,
+      qtyBigMin:10000, qtyBigMax:25000,
+      tpuMin:2, tpuMax:2,
+      arrivalEvery:45, arrivalBatch:1, initialLots:6,
       hotRate:10, hotBonus:1.5, latePenalty:20000,
       queueMax:4, realSeconds:300,
       cap:["ABCDE","ABCDE","ABCDE","ABCDE","ABCDE"]
