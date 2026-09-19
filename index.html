@@ -41,6 +41,14 @@
        border-radius:6px;padding:7px 9px;cursor:pointer}
   .lot:hover{border-color:#58a6ff}
   .lot.sel{border-color:#58a6ff;background:#1b2c47;box-shadow:0 0 0 1px #58a6ff inset}
+  .lot.hot{background:#2c1417}
+  .lot.hot.sel{background:#3a2233}
+  .hotTag{background:var(--down);color:#fff;font-size:10px;padding:1px 5px;border-radius:4px;
+          font-weight:700;animation:hotblink 1.4s ease-in-out infinite}
+  @keyframes hotblink{0%,100%{opacity:1}50%{opacity:.4}}
+  .due{color:var(--dim)}
+  .due.warn{color:var(--setup);font-weight:700}
+  .due.late{color:var(--down);font-weight:700}
   .lot .r1{display:flex;justify-content:space-between;align-items:center;gap:6px}
   .lot .r2{color:var(--dim);font-size:11px;margin-top:3px;font-variant-numeric:tabular-nums}
   .tag{font-size:11px;padding:1px 6px;border-radius:4px;font-weight:700;color:#fff}
@@ -78,6 +86,9 @@
   .hint{position:absolute;top:8px;right:8px;background:#1f6feb;color:#fff;font-size:11px;
         padding:2px 7px;border-radius:10px;font-weight:700}
   .hint.free{background:#238636}.hint.pkg{background:#9e6a03}
+  .preempt{background:#6e2328;border-color:var(--down);font-size:11px;padding:3px 8px;margin-top:8px;width:100%}
+  .sortrow{display:flex;gap:4px;margin-bottom:6px}
+  .sortrow button{font-size:11px;padding:2px 8px;flex:1}
   #log{height:120px;overflow:auto;font-size:12px;color:var(--dim);font-variant-numeric:tabular-nums}
   #log div{padding:1px 0;border-bottom:1px solid #1b2129}
   #params{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px}
@@ -109,6 +120,7 @@
     <div><i>完成批數</i><b id="kLots">0</b></div>
     <div><i>稼動率</i><b id="kUtil">0%</b></div>
     <div><i>分數</i><b id="kScore">0</b></div>
+    <div><i>逾期扣分</i><b id="kPen">0</b></div>
     <div><i>WIP 待派</i><b id="kWip">0</b></div>
   </div>
   <div class="ctrl">
@@ -125,6 +137,10 @@
   <div>
     <div class="panel">
       <h2><span>WIP 待派工</span><span id="wipCnt">0</span></h2>
+      <div class="sortrow">
+        <button data-sort="due" id="sortDue" class="on">依交期</button>
+        <button data-sort="arrive" id="sortArr">依到貨</button>
+      </div>
       <div id="wipList"></div>
     </div>
     <div class="panel" style="margin-top:12px">
@@ -153,6 +169,8 @@
           ・Package 同 ＋ 程式不同 → 換程式 <code id="rSetupProg">30</code> 分鐘<br>
           ・Package 不同 → 換 Kit <code id="rSetupPkg">60</code> 分鐘（含載入程式）</p>
           <p><b>測試流程</b>：T1 測全批 → 良率隨機 <code id="rYield">80~99%</code> → 未達 <code id="rG1">99%</code> 時 fail 品進 RT1（只測 fail 顆數）→ 仍未達 <code id="rG2">98%</code> 再進 RT2 → 完成出貨。Retest 不用改機，但照樣佔機台時間。</p>
+          <p><b>交期與優先批</b>：每批到貨時帶一個交期。<span class="hotTag">HOT</span> 是客戶催的優先批，交期短很多，<u>準時</u>完成良品算 <code id="rHotBonus">1.5</code> 倍。逾期完成、或收工時還沒完成（且交期在今天內）的批，每批固定扣 <code id="rPen">5000</code> 分，Hot Lot 扣雙倍。</p>
+          <p><b>插單</b>：選到 Hot Lot 時，正在測試的機台會出現 <b style="color:var(--down)">⚡插單</b> 按鈕。插單會把原本那批退回 WIP <u>且已測進度全部歸零</u>（要重測 T1），改機時間照算——要不要插，自己權衡。</p>
           <p><b>當機</b>：每台機每小時有機率故障，修復 10~120 分鐘，修好後從中斷處續測。</p>
           <p><b>操作</b>：點左邊貨批 → 點亮起的機台卡即派工（卡片右上角顯示要花的改機時間）。閒置機台也可以先用下方 <b>改機</b> 預先換好 Kit／程式卡位。</p>
           <p><b>計分</b>：只有<u>當天完成的批</u>才計良品顆數。<code>分數 = 良品顆數 × (1 + 稼動率 × 加權)</code>，在製中的批不計分，所以別讓長批在收工時測到一半。</p>
@@ -185,7 +203,9 @@ const DEF = {
   recoverMin:40, recoverMax:80,
   initialLots:6, arrivalEvery:70, arrivalBatch:2,
   qtyMin:2000, qtyMax:10000, tpuMin:0.8, tpuMax:1.8,
-  utilWeight:0.3
+  utilWeight:0.3,
+  hotRate:18, hotBonus:1.5, latePenalty:5000,
+  dueSlackMin:2.5, dueSlackMax:4.0, hotSlackMin:1.3, hotSlackMax:1.8
 };
 const LABEL = {
   realSeconds:["一局實際秒數","秒"], machines:["機台數","台"],
@@ -197,7 +217,10 @@ const LABEL = {
   initialLots:["開局貨批數","批"], arrivalEvery:["到貨間隔","分"], arrivalBatch:["每次到貨","批"],
   qtyMin:["批量下限","顆"], qtyMax:["批量上限","顆"],
   tpuMin:["單顆測試下限","秒"], tpuMax:["單顆測試上限","秒"],
-  utilWeight:["稼動率加權","×"]
+  utilWeight:["稼動率加權","×"],
+  hotRate:["優先批比例","%"], hotBonus:["Hot 準時加成","×"], latePenalty:["逾期扣分","分/批"],
+  dueSlackMin:["一般交期寬鬆下限","×工時"], dueSlackMax:["一般交期寬鬆上限","×工時"],
+  hotSlackMin:["Hot 交期寬鬆下限","×工時"], hotSlackMax:["Hot 交期寬鬆上限","×工時"]
 };
 const P = Object.assign({}, DEF);
 const DAY = 1440;
@@ -216,11 +239,17 @@ let S = null, timer = null, acc = 0;
 function newLot(arrive){
   const qty = Math.round(ri(P.qtyMin,P.qtyMax)/500)*500;
   const tpu = +rf(P.tpuMin,P.tpuMax).toFixed(2);
+  const hot = Math.random() < P.hotRate/100;
+  // 交期 = 到貨 + 預估工時（T1 再加 30% retest 餘裕）× 寬鬆倍數
+  const est = qty * tpu / 60 * 1.3;
+  const slack = hot ? rf(P.hotSlackMin,P.hotSlackMax) : rf(P.dueSlackMin,P.dueSlackMax);
+  const due = Math.round(arrive + est * slack);
   return {
     id:"L"+String(S.seq++).padStart(3,"0"),
     pkg:PKGS[ri(0,PKGS.length-1)], prog:PROGS[ri(0,PROGS.length-1)],
     qty, tpu, baseYield:+rf(P.yieldMin,P.yieldMax).toFixed(1),
-    arrive, state:"WIP", good:0, pending:0, cum:0, rt:0, machine:null
+    arrive, hot, due, state:"WIP", good:0, pending:0, cum:0, rt:0,
+    machine:null, late:false, doneAt:null
   };
 }
 function newMachine(i){
@@ -234,7 +263,8 @@ function newMachine(i){
 }
 function init(){
   S = { t:0, running:false, speed:1, ended:false, seq:1, lots:[], machines:[],
-        nextArrival:P.arrivalEvery, sel:null, log:[], good:0, lots_done:0 };
+        nextArrival:P.arrivalEvery, sel:null, log:[], good:0, lots_done:0,
+        goodScore:0, penalty:0, onTime:0, lateDone:0, missed:0, sortBy:"due" };
   for (let i=0;i<P.machines;i++) S.machines.push(newMachine(i));
   for (let i=0;i<P.initialLots;i++) S.lots.push(newLot(0));
   acc = 0;
@@ -280,9 +310,19 @@ function finishPhase(m){
   else if (m.phase === "RT1")next = (lot.cum >= P.gate2 || lot.pending === 0) ? null : "RT2";
   log(m.name+" "+m.phase+" 完成："+lot.id+" 累積良率 "+y+"%"+(next ? " → 進 "+next : " → 出貨"));
   if (next){ startPhase(m, next); return; }
-  lot.state = "DONE"; lot.machine = m.name;
+  lot.state = "DONE"; lot.machine = m.name; lot.doneAt = S.t;
+  lot.late = S.t > lot.due;
+  const w = (lot.hot && !lot.late) ? P.hotBonus : 1;
   m.good += lot.good; m.lots++;
-  S.good += lot.good; S.lots_done++;
+  S.good += lot.good; S.goodScore += lot.good * w; S.lots_done++;
+  if (lot.late){
+    const pen = P.latePenalty * (lot.hot ? 2 : 1);
+    S.penalty += pen; S.lateDone++;
+    log("⏰ "+lot.id+" 逾期出貨（交期 "+hhmm(lot.due)+"）扣 "+nf(pen)+" 分");
+  } else {
+    S.onTime++;
+    if (lot.hot) log("⭐ HOT "+lot.id+" 準時出貨，良品 ×"+P.hotBonus);
+  }
   m.lot = null; m.phase = null; m.state = "IDLE"; m.remain = m.total = 0;
 }
 
@@ -290,8 +330,9 @@ function stepMinute(){
   S.t++;
   if (S.t < DAY && S.t >= S.nextArrival){
     const n = ri(1, Math.max(1,P.arrivalBatch));
-    for (let i=0;i<n;i++) S.lots.push(newLot(S.t));
-    log("客戶到貨 "+n+" 批");
+    let hots = 0;
+    for (let i=0;i<n;i++){ const l = newLot(S.t); S.lots.push(l); if (l.hot) hots++; }
+    log("客戶到貨 "+n+" 批"+(hots ? "（其中 "+hots+" 批 HOT 優先批）" : ""));
     S.nextArrival = S.t + Math.max(10, Math.round(P.arrivalEvery * rf(0.6,1.4)));
   }
   for (const m of S.machines){
@@ -333,7 +374,17 @@ function utilization(){
   let run = 0; for (const m of S.machines) run += m.run;
   return run / el * 100;
 }
-function score(){ return Math.round(S.good * (1 + utilization()/100 * P.utilWeight)); }
+function score(){
+  return Math.round(S.goodScore * (1 + utilization()/100 * P.utilWeight)) - S.penalty;
+}
+// 交期剩餘時間的顯示樣式
+function dueInfo(lot){
+  const left = lot.due - S.t;
+  const cls = left < 0 ? "late" : left < 120 ? "warn" : "";
+  const txt = left < 0 ? "逾期 "+Math.floor(-left/60)+"h"+String(-left%60).padStart(2,"0")
+            : "剩 "+Math.floor(left/60)+"h"+String(left%60).padStart(2,"0");
+  return {cls, txt};
+}
 
 /* ---------- 操作 ---------- */
 function assign(m, lot){
@@ -349,6 +400,14 @@ function assign(m, lot){
   }
   S.sel = null;
   render();
+}
+function preempt(m, lot){
+  if (m.state !== "RUN" || !m.lot || !lot.hot) return;
+  const cur = m.lot;
+  cur.state = "WIP"; cur.good = 0; cur.pending = 0; cur.cum = 0; cur.rt = 0;
+  m.lot = null; m.phase = null; m.state = "IDLE"; m.remain = m.total = 0;
+  log("⚡ "+m.name+" 插單："+cur.id+" 退回 WIP（進度歸零），改測 HOT "+lot.id);
+  assign(m, lot);
 }
 function convert(m, pkg, prog){
   if (m.state !== "IDLE" || m.lot) return;
@@ -367,21 +426,30 @@ function render(){
   $("#kLots").textContent = S.lots_done;
   $("#kUtil").textContent = utilization().toFixed(0)+"%";
   $("#kScore").textContent = nf(score());
-  const wip = S.lots.filter(l => l.state === "WIP");
+  $("#kPen").textContent = S.penalty ? "-"+nf(S.penalty) : "0";
+  $("#kPen").style.color = S.penalty ? "var(--down)" : "";
+  const wip = S.lots.filter(l => l.state === "WIP")
+    .sort((a,b) => S.sortBy === "due" ? (a.due - b.due) || (a.arrive - b.arrive)
+                                      : (a.arrive - b.arrive) || (a.due - b.due));
   $("#kWip").textContent = wip.length;
   $("#wipCnt").textContent = wip.length + " 批";
 
-  $("#wipList").innerHTML = wip.map(l => `
-    <div class="lot ${S.sel===l.id?"sel":""}" data-lot="${l.id}" style="border-left-color:var(--pkg${l.pkg})">
-      <div class="r1"><b>${l.id}</b>
+  $("#wipList").innerHTML = wip.map(l => {
+    const d = dueInfo(l);
+    return `
+    <div class="lot ${l.hot?"hot":""} ${S.sel===l.id?"sel":""}" data-lot="${l.id}"
+         style="border-left-color:var(--pkg${l.pkg})">
+      <div class="r1"><b>${l.hot?`<span class="hotTag">HOT</span> `:""}${l.id}</b>
         <span><span class="tag pkg${l.pkg}">${l.pkg}</span> <span class="prog">${l.prog}</span></span>
       </div>
-      <div class="r2">${nf(l.qty)} 顆 · ${l.tpu}s/顆 · T1 約 ${phaseMinutes(l,l.qty)} 分 · ${hhmm(l.arrive)} 到貨</div>
-    </div>`).join("") || `<div style="color:var(--dim);font-size:12px;padding:8px">目前沒有待派工貨批</div>`;
+      <div class="r2">${nf(l.qty)} 顆 · ${l.tpu}s/顆 · T1 約 ${phaseMinutes(l,l.qty)} 分</div>
+      <div class="r2">交期 ${hhmm(l.due)} · <span class="due ${d.cls}">${d.txt}</span></div>
+    </div>`; }).join("") || `<div style="color:var(--dim);font-size:12px;padding:8px">目前沒有待派工貨批</div>`;
 
   const sel = S.sel ? S.lots.find(l => l.id === S.sel) : null;
   $("#lines").innerHTML = S.machines.map(m => {
     const canTake = m.state === "IDLE" && !m.lot && sel;
+    const canPreempt = sel && sel.hot && m.state === "RUN" && m.lot;
     let hint = "";
     if (canTake){
       const c = setupCost(m, sel.pkg, sel.prog);
@@ -400,10 +468,12 @@ function render(){
       job = `<b style="color:var(--setup)">改機中</b> → ${m.target.pkg}/${m.target.prog}`
           + (m.lot ? `<br><span style="color:var(--dim)">準備 ${m.lot.id}</span>` : "")
           + `<br>剩 ${m.remain} 分`;
-    else if (m.state === "RUN")
-      job = `<b>${m.lot.id}</b> · ${nf(m.phase==="T1"?m.lot.qty:m.lot.pending)} 顆 · <b style="color:${m.phase==="T1"?"var(--run)":"var(--rt)"}">${m.phase}</b>`
+    else if (m.state === "RUN"){
+      const d = dueInfo(m.lot);
+      job = `<b>${m.lot.hot?`<span class="hotTag">HOT</span> `:""}${m.lot.id}</b> · ${nf(m.phase==="T1"?m.lot.qty:m.lot.pending)} 顆 · <b style="color:${m.phase==="T1"?"var(--run)":"var(--rt)"}">${m.phase}</b>`
           + (m.lot.cum ? ` · 累積 ${m.lot.cum.toFixed(1)}%` : "")
-          + `<br>剩 ${m.remain} / ${m.total} 分`;
+          + `<br>剩 ${m.remain} / ${m.total} 分 · 交期 ${hhmm(m.lot.due)} <span class="due ${d.cls}">${d.txt}</span>`;
+    }
     const opts = (arr,cur) => arr.map(v=>`<option ${v===cur?"selected":""}>${v}</option>`).join("");
     const stateCls = (m.state === "RUN" && m.phase && m.phase !== "T1") ? "RT" : m.state;
     return `
@@ -420,6 +490,7 @@ function render(){
         <select data-cvg="${m.id}" ${m.state!=="IDLE"||m.lot?"disabled":""}>${opts(PROGS,m.prog)}</select>
         <button data-cv="${m.id}" ${m.state!=="IDLE"||m.lot?"disabled":""}>改機</button>
       </div>
+      ${canPreempt ? `<button class="preempt" data-pre="${m.id}">⚡ 插單：${m.lot.id} 退回 WIP（進度歸零）</button>` : ""}
     </div>`;
   }).join("");
 
@@ -443,12 +514,23 @@ function endGame(){
   clearInterval(timer); timer = null;
   $("#btnPlay").textContent = "▶ 開始";
   $("#btnPlay").classList.add("go");
+  // 收工時未完成、但交期在今天內的批，一樣算逾期
+  const missedLots = S.lots.filter(l => l.state !== "DONE" && l.due <= DAY);
+  for (const l of missedLots) S.penalty += P.latePenalty * (l.hot ? 2 : 1);
+  S.missed = missedLots.length;
   const u = utilization();
+  const hotOk = S.lots.filter(l => l.state === "DONE" && l.hot && !l.late).length;
+  const hotAll = S.lots.filter(l => l.hot).length;
   $("#ovScore").textContent = nf(score());
   $("#ovSum").innerHTML =
     `良品產出 <b>${nf(S.good)}</b> 顆 ／ 完成 <b>${S.lots_done}</b> 批 ／ 平均稼動率 <b>${u.toFixed(1)}%</b>`
-    + `<div style="color:var(--dim);font-size:12px;margin-top:4px">分數 = 良品 × (1 + 稼動率 ${u.toFixed(1)}% × 加權 ${P.utilWeight})`
-    + `　未完成在製：${S.lots.filter(l=>l.state!=="WIP"&&l.state!=="DONE").length} 批（不計分）</div>`;
+    + `<div style="margin-top:6px">準時 <b style="color:var(--run)">${S.onTime}</b> 批`
+    + ` ／ 逾期出貨 <b style="color:var(--down)">${S.lateDone}</b> 批`
+    + ` ／ 收工未完成且已到期 <b style="color:var(--down)">${S.missed}</b> 批`
+    + ` ／ HOT 準時 <b>${hotOk}/${hotAll}</b></div>`
+    + `<div style="color:var(--dim);font-size:12px;margin-top:6px">`
+    + `計分良品 ${nf(Math.round(S.goodScore))} 顆（HOT 準時 ×${P.hotBonus}）× (1 + 稼動率 ${u.toFixed(1)}% × ${P.utilWeight})`
+    + ` − 逾期扣分 <span style="color:var(--down)">${nf(S.penalty)}</span></div>`;
   $("#ovTable").innerHTML =
     `<table><tr><th>機台</th><th>良品</th><th>完成批</th><th>測試</th><th>改機</th><th>當機</th><th>閒置</th><th>稼動率</th></tr>`
     + S.machines.map(m => `<tr><td>${m.name}</td><td>${nf(m.good)}</td><td>${m.lots}</td>
@@ -491,6 +573,8 @@ function syncRules(){
   $("#rYield").textContent = P.yieldMin+"~"+P.yieldMax+"%";
   $("#rG1").textContent = P.gate1+"%";
   $("#rG2").textContent = P.gate2+"%";
+  $("#rHotBonus").textContent = P.hotBonus;
+  $("#rPen").textContent = nf(P.latePenalty);
 }
 
 /* ---------- 事件 ---------- */
@@ -502,6 +586,20 @@ document.addEventListener("click", e => {
     const m = S.machines[+cv.dataset.cv];
     convert(m, $(`[data-cvp="${m.id}"]`).value, $(`[data-cvg="${m.id}"]`).value);
     return;
+  }
+  const pre = e.target.closest("[data-pre]");
+  if (pre){
+    const m = S.machines[+pre.dataset.pre];
+    const lot = S.lots.find(l => l.id === S.sel);
+    if (lot && lot.state === "WIP" && lot.hot) preempt(m, lot);
+    return;
+  }
+  const sb = e.target.closest("[data-sort]");
+  if (sb){
+    S.sortBy = sb.dataset.sort;
+    $("#sortDue").classList.toggle("on", S.sortBy === "due");
+    $("#sortArr").classList.toggle("on", S.sortBy === "arrive");
+    render(); return;
   }
   const mc = e.target.closest(".mc.target");
   if (mc && S.sel){
