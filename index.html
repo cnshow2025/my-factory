@@ -87,6 +87,14 @@
         padding:2px 7px;border-radius:10px;font-weight:700}
   .hint.free{background:#238636}.hint.pkg{background:#9e6a03}
   .preempt{background:#6e2328;border-color:var(--down);font-size:11px;padding:3px 8px;margin-top:8px;width:100%}
+  .queue{margin-top:8px;display:flex;flex-direction:column;gap:3px}
+  .qh{font-size:11px;color:var(--dim);letter-spacing:1px}
+  .qchip{display:flex;align-items:center;gap:5px;background:rgba(0,0,0,.32);
+         border:1px solid rgba(255,255,255,.08);border-radius:5px;padding:3px 6px;font-size:11px}
+  .qchip .qn{color:var(--dim)}
+  .qchip .qsp{margin-left:auto;display:flex;gap:3px}
+  .qchip button{padding:0 6px;font-size:11px;line-height:18px;background:rgba(0,0,0,.35)}
+  .qcost{color:var(--setup)}
   .sortrow{display:flex;gap:4px;margin-bottom:6px}
   .sortrow button{font-size:11px;padding:2px 8px;flex:1}
   #log{height:120px;overflow:auto;font-size:12px;color:var(--dim);font-variant-numeric:tabular-nums}
@@ -170,6 +178,7 @@
           ・Package 不同 → 換 Kit <code id="rSetupPkg">60</code> 分鐘（含載入程式）</p>
           <p><b>測試流程</b>：T1 測全批 → 良率隨機 <code id="rYield">80~99%</code> → 未達 <code id="rG1">99%</code> 時 fail 品進 RT1（只測 fail 顆數）→ 仍未達 <code id="rG2">98%</code> 再進 RT2 → 完成出貨。Retest 不用改機，但照樣佔機台時間。</p>
           <p><b>交期與優先批</b>：每批到貨時帶一個交期。<span class="hotTag">HOT</span> 是客戶催的優先批，交期短很多，<u>準時</u>完成良品算 <code id="rHotBonus">1.5</code> 倍。逾期完成、或收工時還沒完成（且交期在今天內）的批，每批固定扣 <code id="rPen">5000</code> 分，Hot Lot 扣雙倍。</p>
+          <p><b>預約排隊</b>：機台在忙也可以先把貨批放上去排隊（每台最多 <code id="rQueue">4</code> 批）。卡片下方的「待接」區依序列出，現批一做完就自動接上，需要改機也會自動開始改。把同 Package 的批排在一起就能省掉換 Kit 的一小時。待接區可以用 ↑ 調順序、✕ 退回 WIP。</p>
           <p><b>插單</b>：選到 Hot Lot 時，正在測試的機台會出現 <b style="color:var(--down)">⚡插單</b> 按鈕。插單會把原本那批退回 WIP <u>且已測進度全部歸零</u>（要重測 T1），改機時間照算——要不要插，自己權衡。</p>
           <p><b>當機</b>：每台機每小時有機率故障，修復 10~120 分鐘，修好後從中斷處續測。</p>
           <p><b>操作</b>：點左邊貨批 → 點亮起的機台卡即派工（卡片右上角顯示要花的改機時間）。閒置機台也可以先用下方 <b>改機</b> 預先換好 Kit／程式卡位。</p>
@@ -204,6 +213,7 @@ const DEF = {
   initialLots:6, arrivalEvery:70, arrivalBatch:2,
   qtyMin:2000, qtyMax:10000, tpuMin:0.8, tpuMax:1.8,
   utilWeight:0.3,
+  queueMax:4,
   hotRate:18, hotBonus:1.5, latePenalty:5000,
   dueSlackMin:2.5, dueSlackMax:4.0, hotSlackMin:1.3, hotSlackMax:1.8
 };
@@ -218,6 +228,7 @@ const LABEL = {
   qtyMin:["批量下限","顆"], qtyMax:["批量上限","顆"],
   tpuMin:["單顆測試下限","秒"], tpuMax:["單顆測試上限","秒"],
   utilWeight:["稼動率加權","×"],
+  queueMax:["每台預約上限","批"],
   hotRate:["優先批比例","%"], hotBonus:["Hot 準時加成","×"], latePenalty:["逾期扣分","分/批"],
   dueSlackMin:["一般交期寬鬆下限","×工時"], dueSlackMax:["一般交期寬鬆上限","×工時"],
   hotSlackMin:["Hot 交期寬鬆下限","×工時"], hotSlackMax:["Hot 交期寬鬆上限","×工時"]
@@ -257,7 +268,7 @@ function newMachine(i){
     id:i, name:"T"+(i+1),
     kit:PKGS[i % PKGS.length], prog:PROGS[i % PROGS.length],
     state:"IDLE", prevState:"IDLE", lot:null, phase:null,
-    remain:0, total:0, target:null,
+    remain:0, total:0, target:null, queue:[],
     run:0, setup:0, down:0, idle:0, good:0, lots:0
   };
 }
@@ -284,6 +295,21 @@ function setupCost(m, pkg, prog){
 }
 function phaseMinutes(lot, qty){ return Math.max(1, Math.ceil(qty * lot.tpu / 60)); }
 
+// 現批做完 → 自動接下一批預約（該改機就自動改機）
+function takeNext(m){
+  if (!m.queue.length){ m.state = "IDLE"; m.total = m.remain = 0; return; }
+  const lot = m.queue.shift();
+  m.lot = lot; lot.state = "ASSIGNED";
+  const cost = setupCost(m, lot.pkg, lot.prog);
+  if (cost > 0){
+    m.target = {pkg:lot.pkg, prog:lot.prog};
+    m.state = "SETUP"; m.total = m.remain = cost;
+    log(m.name+" 接下一批 "+lot.id+"，先改機 "+cost+" 分");
+  } else {
+    log(m.name+" 接下一批 "+lot.id+"（免改機）");
+    startPhase(m, "T1");
+  }
+}
 function startPhase(m, phase){
   const lot = m.lot;
   const qty = phase === "T1" ? lot.qty : lot.pending;
@@ -323,7 +349,8 @@ function finishPhase(m){
     S.onTime++;
     if (lot.hot) log("⭐ HOT "+lot.id+" 準時出貨，良品 ×"+P.hotBonus);
   }
-  m.lot = null; m.phase = null; m.state = "IDLE"; m.remain = m.total = 0;
+  m.lot = null; m.phase = null; m.remain = m.total = 0;
+  takeNext(m);
 }
 
 function stepMinute(){
@@ -356,7 +383,8 @@ function stepMinute(){
         if (m.remain <= 0){
           m.kit = m.target.pkg; m.prog = m.target.prog; m.target = null;
           if (m.lot) startPhase(m, "T1");
-          else { m.state = "IDLE"; m.total = 0; log(m.name+" 改機完成 → Kit "+m.kit+" / "+m.prog); }
+          else { m.state = "IDLE"; m.total = 0;
+                 log(m.name+" 改機完成 → Kit "+m.kit+" / "+m.prog); takeNext(m); }
         }
         break;
       case "RUN":
@@ -364,6 +392,7 @@ function stepMinute(){
         if (m.remain <= 0) finishPhase(m);
         break;
       default:
+        if (!m.lot && m.queue.length){ takeNext(m); break; }
         m.idle++;
     }
   }
@@ -399,6 +428,38 @@ function assign(m, lot){
     startPhase(m, "T1");
   }
   S.sel = null;
+  render();
+}
+// 這台機台「最後的設定」：排在隊尾之後會是什麼 Kit/程式
+function tailConfig(m){
+  if (m.queue.length){ const l = m.queue[m.queue.length-1]; return {pkg:l.pkg, prog:l.prog}; }
+  if (m.lot) return {pkg:m.lot.pkg, prog:m.lot.prog};
+  if (m.target) return {pkg:m.target.pkg, prog:m.target.prog};
+  return {pkg:m.kit, prog:m.prog};
+}
+function tailCost(m, lot){
+  const t = tailConfig(m);
+  if (t.pkg !== lot.pkg) return P.setupPkg;
+  if (t.prog !== lot.prog) return P.setupProg;
+  return 0;
+}
+function enqueue(m, lot){
+  if (m.queue.length >= P.queueMax) return;
+  lot.state = "QUEUED"; lot.machine = m.name;
+  m.queue.push(lot);
+  log(m.name+" 預約 "+lot.id+"（待接第 "+m.queue.length+" 位）");
+  S.sel = null; render();
+}
+function dequeue(m, i){
+  const lot = m.queue.splice(i,1)[0];
+  if (!lot) return;
+  lot.state = "WIP"; lot.machine = null;
+  log(m.name+" 取消預約 "+lot.id+"，退回 WIP");
+  render();
+}
+function queueUp(m, i){
+  if (i <= 0) return;
+  [m.queue[i-1], m.queue[i]] = [m.queue[i], m.queue[i-1]];
   render();
 }
 function preempt(m, lot){
@@ -448,14 +509,17 @@ function render(){
 
   const sel = S.sel ? S.lots.find(l => l.id === S.sel) : null;
   $("#lines").innerHTML = S.machines.map(m => {
-    const canTake = m.state === "IDLE" && !m.lot && sel;
+    const idleFree = m.state === "IDLE" && !m.lot;
+    const canQueue = sel && !idleFree && m.queue.length < P.queueMax;
+    const canTake = sel && (idleFree || canQueue);
     const canPreempt = sel && sel.hot && m.state === "RUN" && m.lot;
     let hint = "";
     if (canTake){
-      const c = setupCost(m, sel.pkg, sel.prog);
-      hint = c === 0 ? `<span class="hint free">直接開測</span>`
-           : c === P.setupProg ? `<span class="hint">換程式 ${c} 分</span>`
-           : `<span class="hint pkg">換 Kit ${c} 分</span>`;
+      const c = idleFree ? setupCost(m, sel.pkg, sel.prog) : tailCost(m, sel);
+      const pre = idleFree ? "" : `排隊 #${m.queue.length+1} · `;
+      hint = c === 0 ? `<span class="hint free">${pre}免改機</span>`
+           : c === P.setupProg ? `<span class="hint">${pre}換程式 ${c} 分</span>`
+           : `<span class="hint pkg">${pre}換 Kit ${c} 分</span>`;
     }
     const pct = m.total ? (1 - m.remain/m.total)*100 : 0;
     const barCls = m.state === "DOWN" ? "DOWN" : m.state === "SETUP" ? "SETUP"
@@ -490,6 +554,21 @@ function render(){
         <select data-cvg="${m.id}" ${m.state!=="IDLE"||m.lot?"disabled":""}>${opts(PROGS,m.prog)}</select>
         <button data-cv="${m.id}" ${m.state!=="IDLE"||m.lot?"disabled":""}>改機</button>
       </div>
+      ${m.queue.length ? `<div class="queue"><div class="qh">待接 ${m.queue.length}/${P.queueMax}</div>`
+        + m.queue.map((l,i) => {
+            const prev = i === 0 ? (m.lot || m.target || {pkg:m.kit, prog:m.prog})
+                                 : m.queue[i-1];
+            const c = prev.pkg !== l.pkg ? P.setupPkg : prev.prog !== l.prog ? P.setupProg : 0;
+            return `<div class="qchip"><span class="qn">${i+1}.</span>
+              <b>${l.hot?`<span class="hotTag">HOT</span> `:""}${l.id}</b>
+              <span class="tag pkg${l.pkg}">${l.pkg}</span><span class="prog">${l.prog}</span>
+              <span class="qcost">${c ? "改機 "+c+"分" : "免改機"}</span>
+              <span class="qsp">
+                <button data-qup="${m.id}:${i}" ${i===0?"disabled":""} title="往前排">↑</button>
+                <button data-qx="${m.id}:${i}" title="退回 WIP">✕</button>
+              </span></div>`;
+          }).join("")
+        + `</div>` : ""}
       ${canPreempt ? `<button class="preempt" data-pre="${m.id}">⚡ 插單：${m.lot.id} 退回 WIP（進度歸零）</button>` : ""}
     </div>`;
   }).join("");
@@ -575,6 +654,7 @@ function syncRules(){
   $("#rG2").textContent = P.gate2+"%";
   $("#rHotBonus").textContent = P.hotBonus;
   $("#rPen").textContent = nf(P.latePenalty);
+  $("#rQueue").textContent = P.queueMax;
 }
 
 /* ---------- 事件 ---------- */
@@ -587,6 +667,10 @@ document.addEventListener("click", e => {
     convert(m, $(`[data-cvp="${m.id}"]`).value, $(`[data-cvg="${m.id}"]`).value);
     return;
   }
+  const qup = e.target.closest("[data-qup]");
+  if (qup){ const [mi,i] = qup.dataset.qup.split(":").map(Number); queueUp(S.machines[mi], i); return; }
+  const qx = e.target.closest("[data-qx]");
+  if (qx){ const [mi,i] = qx.dataset.qx.split(":").map(Number); dequeue(S.machines[mi], i); return; }
   const pre = e.target.closest("[data-pre]");
   if (pre){
     const m = S.machines[+pre.dataset.pre];
@@ -605,7 +689,9 @@ document.addEventListener("click", e => {
   if (mc && S.sel){
     const m = S.machines[+mc.dataset.m];
     const lot = S.lots.find(l => l.id === S.sel);
-    if (lot && lot.state === "WIP") assign(m, lot);
+    if (!lot || lot.state !== "WIP") return;
+    if (m.state === "IDLE" && !m.lot) assign(m, lot);
+    else enqueue(m, lot);
   }
 });
 $("#btnPlay").onclick = play;
