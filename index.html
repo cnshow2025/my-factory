@@ -1042,16 +1042,17 @@ const PRESETS = [
   { id:"myfab", name:"我的工廠（實機參數）",
     desc:"現場條件：5 台測試機、封裝 5 種、測試程式 8 種、批量 3,000~25,000 顆、單顆 2 秒、" +
          "換 Kit 60 分、換程式 30 分、良率 80~99%、RT 門檻 99/98、一天 24 小時三班。" +
-         "當機率、Retest 救回率、逾期成本、HOT 比例仍是估計值，改成實際數字後按「存成我的工廠」。",
+         "當機率 5%/小時、Retest 救回率 60%、HOT 比例 10%、逾期一批扣 20,000 分。",
     P:Object.assign({}, DEF, {
       machines:5, setupPkg:60, setupProg:30,
       pkgTypes:5, progTypes:8,
       yieldMin:80, yieldMax:99, gate1:99, gate2:98,
       recoverMin:40, recoverMax:80,
-      downPerHour:8, downMin:10, downMax:120,
+      downPerHour:5, downMin:10, downMax:120,
+      recoverMin:60, recoverMax:60,
       qtyMin:3000, qtyMax:25000, tpuMin:2, tpuMax:2,
       arrivalEvery:100, arrivalBatch:1, initialLots:5,
-      hotRate:18, hotBonus:1.5, latePenalty:5000,
+      hotRate:10, hotBonus:1.5, latePenalty:20000,
       queueMax:4, realSeconds:300,
       cap:["ABCDE","ABCDE","ABCDE","ABCDE","ABCDE"]
     }) }
