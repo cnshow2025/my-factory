@@ -88,7 +88,9 @@
   .hint.free{background:#238636}.hint.pkg{background:#9e6a03}
   .preempt{background:#6e2328;border-color:var(--down);font-size:11px;padding:3px 8px;margin-top:8px;width:100%}
   .queue{margin-top:8px;display:flex;flex-direction:column;gap:3px}
-  .qh{font-size:11px;color:var(--dim);letter-spacing:1px}
+  .qh{font-size:11px;color:var(--dim);letter-spacing:1px;display:flex;align-items:center;gap:5px}
+  .qh .qmv{margin-left:auto;display:flex;gap:4px}
+  .qh select,.qh button{font-size:11px;padding:1px 6px;background:rgba(0,0,0,.35)}
   .qchip{display:flex;align-items:center;gap:5px;background:rgba(0,0,0,.32);
          border:1px solid rgba(255,255,255,.08);border-radius:5px;padding:3px 6px;font-size:11px}
   .qchip .qn{color:var(--dim)}
@@ -462,6 +464,18 @@ function queueUp(m, i){
   [m.queue[i-1], m.queue[i]] = [m.queue[i], m.queue[i-1]];
   render();
 }
+// 把整批待接預約搬到別台機
+function moveQueue(from, to){
+  if (!from || !to || from === to || !from.queue.length) return;
+  const space = P.queueMax - to.queue.length;
+  if (space <= 0){ log("⚠ "+to.name+" 待接已滿，接不下 "+from.name+" 的預約"); render(); return; }
+  const moving = from.queue.splice(0, space);
+  for (const l of moving){ l.machine = to.name; to.queue.push(l); }
+  log("↦ "+from.name+" 待接 "+moving.length+" 批（"+moving.map(l=>l.id).join("、")+"）移到 "+to.name
+      + (from.queue.length ? "，"+from.name+" 仍留 "+from.queue.length+" 批" : ""));
+  if (to.state === "IDLE" && !to.lot) takeNext(to);
+  render();
+}
 function preempt(m, lot){
   if (m.state !== "RUN" || !m.lot || !lot.hot) return;
   const cur = m.lot;
@@ -554,7 +568,12 @@ function render(){
         <select data-cvg="${m.id}" ${m.state!=="IDLE"||m.lot?"disabled":""}>${opts(PROGS,m.prog)}</select>
         <button data-cv="${m.id}" ${m.state!=="IDLE"||m.lot?"disabled":""}>改機</button>
       </div>
-      ${m.queue.length ? `<div class="queue"><div class="qh">待接 ${m.queue.length}/${P.queueMax}</div>`
+      ${m.queue.length ? `<div class="queue"><div class="qh">待接 ${m.queue.length}/${P.queueMax}
+          <span class="qmv">
+            <select data-mvt="${m.id}">${S.machines.filter(x=>x.id!==m.id).map(x=>
+              `<option value="${x.id}">${x.name}${x.queue.length>=P.queueMax?"（滿）":""}</option>`).join("")}</select>
+            <button data-mv="${m.id}" title="把待接的批整批移到另一台">整批移轉 ↦</button>
+          </span></div>`
         + m.queue.map((l,i) => {
             const prev = i === 0 ? (m.lot || m.target || {pkg:m.kit, prog:m.prog})
                                  : m.queue[i-1];
@@ -666,6 +685,12 @@ document.addEventListener("click", e => {
     const m = S.machines[+cv.dataset.cv];
     convert(m, $(`[data-cvp="${m.id}"]`).value, $(`[data-cvg="${m.id}"]`).value);
     return;
+  }
+  const mv = e.target.closest("[data-mv]");
+  if (mv){
+    const from = S.machines[+mv.dataset.mv];
+    const to = S.machines[+$(`[data-mvt="${from.id}"]`).value];
+    moveQueue(from, to); return;
   }
   const qup = e.target.closest("[data-qup]");
   if (qup){ const [mi,i] = qup.dataset.qup.split(":").map(Number); queueUp(S.machines[mi], i); return; }
