@@ -49,15 +49,24 @@
   #lines{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
   .mc{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px;position:relative}
   .mc.target{border-color:#58a6ff;cursor:pointer}
-  .mc.target:hover{background:#151d2b}
+  .mc.target:hover{filter:brightness(1.25)}
+  .mc.IDLE{background:#161b22}
+  .mc.SETUP{background:#3a2c0b;border-color:var(--setup)}
+  .mc.RUN{background:#0f3a1e;border-color:var(--run)}
+  .mc.RT{background:#2b1d4d;border-color:var(--rt)}
+  .mc.DOWN{background:#4a171b;border-color:var(--down);animation:alarm 1.6s ease-in-out infinite}
+  @keyframes alarm{0%,100%{box-shadow:0 0 0 0 rgba(248,81,73,0)}
+                   50%{box-shadow:0 0 0 4px rgba(248,81,73,.35)}}
   .mc .mh{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .mc .cfg,.mc .mstat{color:#c9d1d9}
+  .mc select,.mc .tools button{background:rgba(0,0,0,.3)}
   .mc .mh b{font-size:15px}
   .st{font-size:11px;padding:2px 8px;border-radius:10px;color:#0d1117;font-weight:700;margin-left:auto}
   .st.IDLE{background:var(--idle);color:#fff}.st.SETUP{background:var(--setup)}
   .st.RUN{background:var(--run);color:#fff}.st.DOWN{background:var(--down);color:#fff}
   .cfg{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--dim);margin-bottom:6px}
-  .job{background:var(--panel2);border-radius:6px;padding:6px 8px;min-height:52px;font-size:12px}
-  .bar{height:8px;background:#0d1117;border-radius:4px;overflow:hidden;margin-top:6px}
+  .job{background:rgba(0,0,0,.3);border-radius:6px;padding:6px 8px;min-height:52px;font-size:12px}
+  .bar{height:8px;background:rgba(0,0,0,.45);border-radius:4px;overflow:hidden;margin-top:6px}
   .bar div{height:100%;width:0;background:var(--run)}
   .bar.SETUP div{background:var(--setup)}.bar.DOWN div{background:var(--down)}
   .bar.RT div{background:var(--rt)}
@@ -396,8 +405,9 @@ function render(){
           + (m.lot.cum ? ` · 累積 ${m.lot.cum.toFixed(1)}%` : "")
           + `<br>剩 ${m.remain} / ${m.total} 分`;
     const opts = (arr,cur) => arr.map(v=>`<option ${v===cur?"selected":""}>${v}</option>`).join("");
+    const stateCls = (m.state === "RUN" && m.phase && m.phase !== "T1") ? "RT" : m.state;
     return `
-    <div class="mc ${canTake?"target":""}" data-m="${m.id}">
+    <div class="mc ${stateCls} ${canTake?"target":""}" data-m="${m.id}">
       ${hint}
       <div class="mh"><b>${m.name}</b><span class="st ${m.state}">${m.state}</span></div>
       <div class="cfg">Kit <span class="tag pkg${m.kit}">${m.kit}</span> 程式 <span class="prog">${m.prog}</span></div>
