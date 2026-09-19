@@ -154,6 +154,17 @@
   .ovbox{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:24px;
          width:min(560px,92vw);max-height:88vh;overflow:auto}
   .ovbox h2{margin:0 0 4px}
+  .ovtl{margin-top:16px}
+  .ovtl h3{font-size:12px;color:var(--dim);margin:0 0 8px;font-weight:500;letter-spacing:1px}
+  .ovrow{display:grid;grid-template-columns:34px 1fr 46px;gap:8px;align-items:center;margin-bottom:5px}
+  .ovrow b{font-size:12px}
+  .ovrow .u{font-size:11px;color:var(--dim);text-align:right;font-variant-numeric:tabular-nums}
+  .ovrow .tl{margin-top:0}
+  .ovmix{display:flex;height:14px;border-radius:3px;overflow:hidden;margin-top:2px}
+  .ovmix div{height:100%}
+  .ovmixlab{display:flex;flex-wrap:wrap;gap:10px;font-size:11px;color:var(--dim);margin-top:5px}
+  .ovmixlab span{display:flex;align-items:center;gap:4px}
+  .ovmixlab i{width:10px;height:8px;border-radius:2px;display:inline-block}
   .score{font-size:44px;font-weight:800;color:#2ea043;font-variant-numeric:tabular-nums}
   table{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px;font-variant-numeric:tabular-nums}
   th,td{border-bottom:1px solid var(--line);padding:5px 4px;text-align:right}
@@ -303,6 +314,7 @@
   <div style="color:var(--dim);font-size:12px">一局 = 工廠一天 1440 分鐘</div>
   <div class="score" id="ovScore">0</div>
   <div id="ovSum" style="font-size:13px"></div>
+  <div class="ovtl" id="ovTimeline"></div>
   <div id="ovTable"></div>
   <div style="margin-top:16px;display:flex;gap:8px">
     <button class="go" id="ovAgain">再玩一局</button>
@@ -735,7 +747,7 @@ function ringSVG(m, pct){
   </svg>`;
 }
 // 一整天 1440 分鐘的狀態分佈，現在時間用白線標出
-function timelineSVG(m){
+function timelineSVG(m, showNow = true){
   const segs = m.segs.map(g =>
     `<rect x="${g.a}" y="0" width="${Math.max(1, g.b-g.a)}" height="10"
        fill="${STATE_COLOR[g.c]}"><title>${hhmm(g.a)}–${hhmm(g.b)} ${
@@ -743,7 +755,7 @@ function timelineSVG(m){
   const now = Math.min(S.t, DAY);
   return `<svg viewBox="0 0 ${DAY} 10" preserveAspectRatio="none">
       ${segs}
-      <line x1="${now}" x2="${now}" y1="0" y2="10" stroke="#e6edf3" stroke-width="4"/>
+      ${showNow ? `<line x1="${now}" x2="${now}" y1="0" y2="10" stroke="#e6edf3" stroke-width="4"/>` : ""}
     </svg>
     <div class="tlx"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div>`;
 }
@@ -1126,6 +1138,29 @@ function endGame(){
     + `<div style="color:var(--dim);font-size:12px;margin-top:6px">`
     + `計分良品 ${nf(Math.round(S.goodScore))} 顆（HOT 準時 ×${P.hotBonus}）× (1 + 稼動率 ${u.toFixed(1)}% × ${P.utilWeight})`
     + ` − 逾期扣分 <span style="color:var(--down)">${nf(S.penalty)}</span></div>`;
+  // 五台機一整天的稼動時間軸總覽 + 全廠時間結構
+  const tot = { RUN:0, RT:0, SETUP:0, DOWN:0, IDLE:0 };
+  for (const m of S.machines)
+    for (const g of m.segs) tot[g.c] += g.b - g.a;
+  const totAll = Math.max(1, Object.values(tot).reduce((a,b) => a+b, 0));
+  const MIXNAME = { RUN:"測試", RT:"Retest", SETUP:"改機", DOWN:"當機", IDLE:"閒置" };
+  $("#ovTimeline").innerHTML =
+    `<h3>當天各機台稼動時間軸（00:00 → 24:00）</h3>`
+    + S.machines.map(m => `<div class="ovrow">
+        <b>${m.name}</b>
+        <div class="tl">${timelineSVG(m, false)}</div>
+        <span class="u">${(m.run/DAY*100).toFixed(0)}%</span>
+      </div>`).join("")
+    + `<h3 style="margin-top:14px">全廠時間結構（5 台機 × 1440 分鐘）</h3>
+       <div class="ovmix">`
+    + Object.keys(MIXNAME).map(k => tot[k]
+        ? `<div style="width:${(tot[k]/totAll*100).toFixed(2)}%;background:${STATE_COLOR[k]}"
+              title="${MIXNAME[k]} ${nf(tot[k])} 分"></div>` : "").join("")
+    + `</div><div class="ovmixlab">`
+    + Object.keys(MIXNAME).map(k =>
+        `<span><i style="background:${STATE_COLOR[k]}"></i>${MIXNAME[k]} ${nf(tot[k])} 分（${(tot[k]/totAll*100).toFixed(1)}%）</span>`).join("")
+    + `</div>`;
+
   $("#ovTable").innerHTML =
     `<table><tr><th>機台</th><th>良品</th><th>完成批</th><th>測試</th><th>改機</th><th>當機</th><th>閒置</th><th>稼動率</th></tr>`
     + S.machines.map(m => `<tr><td>${m.name}</td><td>${nf(m.good)}</td><td>${m.lots}</td>
