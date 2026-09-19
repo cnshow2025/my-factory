@@ -76,6 +76,8 @@
   .tl{margin-top:8px}
   .tl svg{width:100%;height:13px;display:block;border-radius:3px;background:rgba(0,0,0,.4)}
   .tlx{display:flex;justify-content:space-between;font-size:9px;color:var(--dim);margin-top:2px}
+  .tlx.hit{font-size:10px;color:var(--txt);gap:6px}
+  .tl svg{cursor:crosshair}
   .tlleg{display:flex;flex-wrap:wrap;gap:12px;font-size:11px;color:var(--dim);margin-bottom:8px}
   .tlleg span{display:flex;align-items:center;gap:5px}
   .tlleg i{width:14px;height:8px;border-radius:2px;display:inline-block}
@@ -577,6 +579,8 @@ function stepMinute(){
       log("⚠ "+m.name+" 當機，預計 "+m.downRemain+" 分鐘");
     }
     const before = m.state, wasRT = m.phase && m.phase !== "T1";
+    const beforePhase = m.phase, beforeLot = m.lot ? m.lot.id : null;
+    const beforeTarget = m.target ? m.target.pkg+"/"+m.target.prog : null;
     switch(m.state){
       case "DOWN":
         m.down++; m.downRemain--;
@@ -602,12 +606,17 @@ function stepMinute(){
         if (!m.lot && m.queue.length){ takeNext(m); break; }
         m.idle++;
     }
-    // 記下這一分鐘這台機在做什麼，合併成連續區段供時間軸使用
+    // 記下這一分鐘這台機在做什麼（含當時那批貨），合併成連續區段供時間軸使用
     const code = before === "DOWN" ? "DOWN" : before === "SETUP" ? "SETUP"
                : before === "RUN" ? (wasRT ? "RT" : "RUN") : "IDLE";
+    const label = code === "DOWN"  ? "當機維修" + (beforeLot ? "（"+beforeLot+" 暫停）" : "")
+                : code === "SETUP" ? "改機" + (beforeTarget ? " → "+beforeTarget : "")
+                                   + (beforeLot ? "（準備 "+beforeLot+"）" : "")
+                : code === "IDLE"  ? "閒置待料"
+                                   : beforePhase + " " + beforeLot;
     const last = m.segs[m.segs.length-1];
-    if (last && last.c === code) last.b = S.t;
-    else m.segs.push({ c:code, a:S.t-1, b:S.t });
+    if (last && last.c === code && last.t === label) last.b = S.t;
+    else m.segs.push({ c:code, a:S.t-1, b:S.t, t:label });
   }
 }
 
@@ -746,18 +755,26 @@ function ringSVG(m, pct){
     ${testerIcon(col)}
   </svg>`;
 }
-// 一整天 1440 分鐘的狀態分佈，現在時間用白線標出
+// 一整天 1440 分鐘的狀態分佈，現在時間用白線標出。
+// 滑過去時讀出那個時間點在做什麼、測哪一批（游標位置存在 S.hover，重畫才不會閃掉）
+function segAt(m, min){ return m.segs.find(g => min >= g.a && min < g.b) || null; }
 function timelineSVG(m, showNow = true){
   const segs = m.segs.map(g =>
     `<rect x="${g.a}" y="0" width="${Math.max(1, g.b-g.a)}" height="10"
-       fill="${STATE_COLOR[g.c]}"><title>${hhmm(g.a)}–${hhmm(g.b)} ${
-       {RUN:"測試",RT:"Retest",SETUP:"改機",DOWN:"當機",IDLE:"閒置"}[g.c]}（${g.b-g.a} 分）</title></rect>`).join("");
+       fill="${STATE_COLOR[g.c]}"><title>${hhmm(g.a)}–${hhmm(g.b)} ${g.t}（${g.b-g.a} 分）</title></rect>`).join("");
   const now = Math.min(S.t, DAY);
-  return `<svg viewBox="0 0 ${DAY} 10" preserveAspectRatio="none">
+  const hv = showNow && S.hover && S.hover.mi === m.id ? S.hover.min : null;
+  const seg = hv === null ? null : segAt(m, hv);
+  const foot = seg
+    ? `<div class="tlx hit"><span>${hhmm(seg.a)}–${hhmm(seg.b)}</span>
+         <span style="color:${STATE_COLOR[seg.c]};font-weight:700">${seg.t}</span>
+         <span>${seg.b-seg.a} 分</span></div>`
+    : `<div class="tlx"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div>`;
+  return `<svg viewBox="0 0 ${DAY} 10" preserveAspectRatio="none" data-tl="${m.id}">
       ${segs}
       ${showNow ? `<line x1="${now}" x2="${now}" y1="0" y2="10" stroke="#e6edf3" stroke-width="4"/>` : ""}
-    </svg>
-    <div class="tlx"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div>`;
+      ${hv !== null ? `<line x1="${hv}" x2="${hv}" y1="0" y2="10" stroke="#58a6ff" stroke-width="4"/>` : ""}
+    </svg>${foot}`;
 }
 
 /* ---------- 畫面 ---------- */
@@ -1340,6 +1357,23 @@ document.addEventListener("click", e => {
     else enqueue(m, lot);
   }
 });
+// 時間軸游標：記在狀態裡，遊戲重畫也不會閃掉
+let hoverRaf = 0;
+function setHover(h){
+  const a = S.hover, same = (!a && !h) || (a && h && a.mi === h.mi && a.min === h.min);
+  if (same) return;
+  S.hover = h;
+  if (!hoverRaf) hoverRaf = requestAnimationFrame(() => { hoverRaf = 0; render(); });
+}
+document.addEventListener("mousemove", e => {
+  const svg = e.target.closest ? e.target.closest("svg[data-tl]") : null;
+  if (!svg){ if (S.hover) setHover(null); return; }
+  const box = svg.getBoundingClientRect();
+  const min = Math.max(0, Math.min(DAY-1, Math.round((e.clientX - box.left) / box.width * DAY)));
+  setHover({ mi:+svg.dataset.tl, min });
+});
+document.addEventListener("mouseleave", () => setHover(null));
+
 $("#btnPlay").onclick = play;
 $("#btnReset").onclick = reset;
 $("#ovAgain").onclick = reset;
