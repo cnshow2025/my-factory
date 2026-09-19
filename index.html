@@ -88,7 +88,10 @@
   .st{font-size:11px;padding:2px 8px;border-radius:10px;color:#0d1117;font-weight:700;margin-left:auto}
   .st.IDLE{background:var(--idle);color:#fff}.st.SETUP{background:var(--setup)}
   .st.RUN{background:var(--run);color:#fff}.st.DOWN{background:var(--down);color:#fff}
-  .cfg{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--dim);margin-bottom:6px}
+  .cfg{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--dim);
+       margin-bottom:6px;flex-wrap:wrap;white-space:nowrap}
+  .cfg .cap{margin-left:auto;font-size:10px}
+  .mc{overflow:hidden}
   .job{background:rgba(0,0,0,.3);border-radius:6px;padding:6px 8px;min-height:52px;font-size:12px}
   .mstat{display:flex;gap:10px;color:var(--dim);font-size:11px;margin-top:6px;
          font-variant-numeric:tabular-nums;flex-wrap:wrap}
@@ -174,7 +177,49 @@
   th{color:var(--dim);font-weight:500}
   .rules{font-size:12px;color:var(--dim);line-height:1.7}
   .rules code{background:var(--panel2);padding:1px 5px;border-radius:4px;color:#c9d1d9}
-  @media(max-width:820px){main{grid-template-columns:1fr}#wipList{max-height:30vh}}
+  /* 拖曳派工 */
+  .lot{touch-action:pan-y}
+  body.dragging{user-select:none;-webkit-user-select:none}
+  .ghost{position:fixed;z-index:100;pointer-events:none;transform:translate(-50%,-150%);
+         background:var(--panel);border:1px solid #58a6ff;border-radius:6px;padding:4px 8px;
+         font-size:12px;font-weight:700;box-shadow:0 6px 18px rgba(0,0,0,.5);white-space:nowrap}
+  .mc.over{outline:2px solid #58a6ff;outline-offset:2px}
+  .mc.over.no{outline-color:var(--down)}
+  .cmpHint{display:none}
+
+  @media(max-width:820px) and (orientation:landscape){main{grid-template-columns:260px 1fr}}
+
+  /* 手機直向：左邊貨批、右邊機台，只留顏色與關鍵數字 */
+  @media(max-width:760px) and (orientation:portrait){
+    header{padding:6px 10px;gap:8px}
+    h1{font-size:13px} h1 span{display:none}
+    .clock{font-size:19px;min-width:58px}
+    .kpi{gap:5px} .kpi div{padding:2px 7px;min-width:0}
+    .kpi b{font-size:13px} .kpi i{font-size:9px}
+    .ctrl{gap:4px} .ctrl button{padding:5px 8px;font-size:12px}
+    main{grid-template-columns:46% 1fr;gap:6px;padding:6px;align-items:start}
+    .panel{padding:7px}
+    .panel>h2{font-size:12px;margin-bottom:6px}
+    #wipList{max-height:none;gap:5px}
+    .lot{padding:5px 7px}
+    .lot .r2{font-size:10px;margin-top:2px}
+    .hideMobile{display:none}
+    .tlleg{display:none}
+    #lines{grid-template-columns:1fr;gap:6px}
+    .mc{padding:7px}
+    .mc .tl,.mc .mstat,.mc .tools,.mc .queue,.mc .preempt{display:none}
+    .mtop{gap:7px;margin-bottom:5px}
+    .ring{width:40px;height:40px}
+    .mc .mh b{font-size:14px}
+    .cfg{font-size:11px;gap:4px}
+    .cfg .cap{margin-left:0;width:100%;font-size:10px}
+    .job{min-height:0;padding:4px 6px;font-size:11px;line-height:1.5}
+    /* 角標在窄卡片會蓋住機台代號，改成獨立一行 */
+    .hint{position:static;display:block;font-size:10px;padding:2px 6px;margin-bottom:5px;text-align:center}
+    .cmpHint{display:block;grid-column:1/-1;font-size:11px;color:var(--dim);
+             text-align:center;padding:2px 0 4px}
+  }
+  @media(max-width:820px) and (orientation:portrait){#wipList{max-height:none}}
 </style>
 </head>
 <body>
@@ -200,6 +245,7 @@
 <div class="dayline"><div id="dayBar"></div></div>
 
 <main>
+  <div class="cmpHint">直向為精簡模式 · 手機橫置可看完整資訊（時間軸／待接佇列／改機／跑分）</div>
   <div>
     <div class="panel">
       <h2><span>WIP 待派工</span><span id="wipCnt">0</span></h2>
@@ -209,7 +255,7 @@
       </div>
       <div id="wipList"></div>
     </div>
-    <div class="panel" style="margin-top:12px">
+    <div class="panel hideMobile" style="margin-top:12px">
       <h2>事件記錄</h2>
       <div id="log"></div>
     </div>
@@ -226,7 +272,7 @@
     </div>
     <div id="lines"></div>
 
-    <div class="panel" style="margin-top:12px">
+    <div class="panel hideMobile" style="margin-top:12px">
       <details open>
         <summary>🤖 排程演算法（自動派工與跑分比較）</summary>
         <div id="algo">
@@ -269,7 +315,7 @@
       </details>
     </div>
 
-    <div class="panel" style="margin-top:12px">
+    <div class="panel hideMobile" style="margin-top:12px">
       <details>
         <summary>⚙ 背景參數（重新開始後套用批量/機台設定，其餘即時生效）</summary>
         <div class="arow" style="margin-top:10px">
@@ -289,7 +335,7 @@
       </details>
     </div>
 
-    <div class="panel" style="margin-top:12px">
+    <div class="panel hideMobile" style="margin-top:12px">
       <details open>
         <summary>📋 玩法規則</summary>
         <div class="rules" style="margin-top:8px">
@@ -839,15 +885,16 @@ function render(){
     }
     const opts = (arr,cur) => arr.map(v=>`<option ${v===cur?"selected":""}>${v}</option>`).join("");
     const stateCls = (m.state === "RUN" && m.phase && m.phase !== "T1") ? "RT" : m.state;
+    const over = drag && drag.on && drag.overMi === m.id;
     return `
-    <div class="mc ${stateCls} ${canTake?"target":""}" data-m="${m.id}">
+    <div class="mc ${stateCls} ${canTake?"target":""} ${over?(able?"over":"over no"):""}" data-m="${m.id}">
       ${hint}
       <div class="mtop">
         ${ringSVG(m, pct)}
         <div class="mid">
           <div class="mh"><b>${m.name}</b>${m.total ? `<span style="font-size:11px;color:var(--dim)">${Math.round(pct)}%</span>` : ""}<span class="st ${m.state}">${m.state}</span></div>
           <div class="cfg">Kit <span class="tag pkg${m.kit}">${m.kit}</span> 程式 <span class="prog">${m.prog}</span>
-            <span style="margin-left:auto;font-size:10px">可測 ${(P.cap[m.id]||"").split("").join("·")}</span></div>
+            <span class="cap">可測 ${(P.cap[m.id]||"").split("").join("·")}</span></div>
         </div>
       </div>
       <div class="job">${job}</div>
@@ -1314,8 +1361,68 @@ function syncRules(){
   $("#rQueue").textContent = P.queueMax;
 }
 
+/* ---------- 拖曳派工（觸控與滑鼠通用） ---------- */
+let drag = null, dragEndAt = 0;
+
+function dropOnMachine(m, lot){
+  if (!m || !lot || lot.state !== "WIP") return;
+  if (!canRun(m, lot.pkg)){ log("✋ "+m.name+" 不能測封裝 "+lot.pkg+"（"+lot.id+"）"); render(); return; }
+  if (m.state === "IDLE" && !m.lot) assign(m, lot);
+  else enqueue(m, lot);
+}
+document.addEventListener("pointerdown", e => {
+  const el = e.target.closest && e.target.closest("[data-lot]");
+  if (!el) return;
+  drag = { id:el.dataset.lot, x0:e.clientX, y0:e.clientY, on:false, ghost:null, overMi:null };
+});
+document.addEventListener("pointermove", e => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x0, dy = e.clientY - drag.y0;
+  if (!drag.on){
+    // 垂直移動留給清單捲動，橫向拉出去才算拖曳
+    if (Math.abs(dx) < 12 || Math.abs(dx) <= Math.abs(dy)) return;
+    const lot = S.lots.find(l => l.id === drag.id);
+    if (!lot || lot.state !== "WIP"){ drag = null; return; }
+    drag.on = true;
+    S.sel = lot.id;                       // 相容的機台跟著亮起來
+    drag.ghost = document.createElement("div");
+    drag.ghost.className = "ghost";
+    drag.ghost.innerHTML = `<span class="tag pkg${lot.pkg}">${lot.pkg}</span> ${lot.id}`;
+    document.body.appendChild(drag.ghost);
+    document.body.classList.add("dragging");
+  }
+  drag.ghost.style.left = e.clientX+"px";
+  drag.ghost.style.top = e.clientY+"px";
+  drag.ghost.style.display = "none";      // 免得抓到自己
+  const under = document.elementFromPoint(e.clientX, e.clientY);
+  drag.ghost.style.display = "";
+  const mc = under && under.closest ? under.closest(".mc") : null;
+  const mi = mc ? +mc.dataset.m : null;
+  if (mi !== drag.overMi){ drag.overMi = mi; render(); }
+  e.preventDefault();
+});
+document.addEventListener("pointerup", e => {
+  if (!drag) return;
+  const d = drag; drag = null;
+  if (d.ghost) d.ghost.remove();
+  document.body.classList.remove("dragging");
+  if (!d.on) return;                       // 沒拖動 → 當成點選，交給 click
+  // 用時間窗擋掉拖曳尾巴帶出來的那一下 click；旗標會卡住之後的點選，不能用
+  dragEndAt = performance.now();
+  if (d.overMi !== null)
+    dropOnMachine(S.machines[d.overMi], S.lots.find(l => l.id === d.id));
+  S.sel = null; render();
+});
+document.addEventListener("pointercancel", () => {
+  if (!drag) return;
+  if (drag.ghost) drag.ghost.remove();
+  document.body.classList.remove("dragging");
+  drag = null; S.sel = null; render();
+});
+
 /* ---------- 事件 ---------- */
 document.addEventListener("click", e => {
+  if (performance.now() - dragEndAt < 300) return;   // 剛拖曳完，不當成點選
   const lotEl = e.target.closest("[data-lot]");
   if (lotEl){ S.sel = (S.sel === lotEl.dataset.lot) ? null : lotEl.dataset.lot; render(); return; }
   const cv = e.target.closest("[data-cv]");
