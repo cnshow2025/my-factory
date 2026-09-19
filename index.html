@@ -106,6 +106,31 @@
   #params input{width:72px;background:var(--panel2);color:var(--txt);border:1px solid var(--line);
                 border-radius:5px;padding:3px 6px;font-family:inherit;text-align:right}
   details summary{cursor:pointer;color:var(--dim);font-size:13px;letter-spacing:1px}
+  /* 排程演算法面板 */
+  #algo{display:flex;flex-direction:column;gap:10px;margin-top:10px;font-size:12px}
+  .arow{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .arow > label{display:flex;align-items:center;gap:5px;color:var(--dim)}
+  .arow input[type=number]{width:64px;background:var(--panel2);color:var(--txt);
+    border:1px solid var(--line);border-radius:5px;padding:3px 6px;font-family:inherit;text-align:right}
+  .arow input[type=range]{width:110px;accent-color:#1f6feb}
+  .wv{font-variant-numeric:tabular-nums;color:var(--txt);min-width:26px;display:inline-block}
+  .adesc{color:var(--dim);font-size:11px;line-height:1.6}
+  #benchStatus{color:var(--dim);font-size:12px}
+  #benchTable table{margin-top:4px}
+  #benchTable tr.best td{background:rgba(46,160,67,.16)}
+  #benchTable tr.best td:first-child{font-weight:700;color:var(--run)}
+  .chartWrap{position:relative;margin-top:14px}
+  .legend{display:flex;flex-wrap:wrap;gap:10px;font-size:11px;color:var(--dim);margin-bottom:6px}
+  .legend span{display:flex;align-items:center;gap:5px;cursor:pointer;user-select:none}
+  .legend span:hover{color:var(--txt)}
+  .legend span.off{opacity:.35;text-decoration:line-through}
+  .legend i{width:12px;height:3px;border-radius:2px;display:inline-block}
+  .tip{position:absolute;pointer-events:none;opacity:0;transition:opacity .1s;
+       background:#0d1117;border:1px solid var(--line);border-radius:6px;padding:6px 8px;
+       font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap;z-index:5}
+  .tip b{display:block;margin-bottom:3px;color:var(--dim);font-weight:400}
+  .tip div{display:flex;align-items:center;gap:5px}
+  .tip i{width:8px;height:8px;border-radius:2px;display:inline-block}
   .ov{position:fixed;inset:0;background:rgba(5,8,13,.9);display:none;align-items:center;justify-content:center;z-index:50}
   .ov.show{display:flex}
   .ovbox{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:24px;
@@ -161,6 +186,49 @@
 
   <div>
     <div id="lines"></div>
+
+    <div class="panel" style="margin-top:12px">
+      <details open>
+        <summary>🤖 排程演算法（自動派工與跑分比較）</summary>
+        <div id="algo">
+          <div class="arow">
+            <span style="color:var(--dim)">模式</span>
+            <button id="mMan" class="on">手動排程</button>
+            <button id="mAuto">自動排程</button>
+            <label>策略 <select id="polSel"></select></label>
+            <label>情境種子 <input type="number" id="seedIn" value="1" min="1" step="1"></label>
+            <button id="seedApply">套用並重開</button>
+            <button id="seedRnd" title="隨機種子">🎲</button>
+          </div>
+          <div class="adesc" id="polDesc"></div>
+          <div class="arow">
+            <span style="color:var(--dim)">Composite 權重</span>
+            <label>交期 <input type="range" id="wDue" min="0" max="3" step="0.1" value="1"><span class="wv" id="vDue">1</span></label>
+            <label>省改機 <input type="range" id="wSetup" min="0" max="3" step="0.1" value="1"><span class="wv" id="vSetup">1</span></label>
+            <label>短批優先 <input type="range" id="wSpt" min="0" max="3" step="0.1" value="0.5"><span class="wv" id="vSpt">0.5</span></label>
+            <label>HOT <input type="range" id="wHot" min="0" max="10" step="0.5" value="3"><span class="wv" id="vHot">3</span></label>
+          </div>
+          <div class="arow">
+            <span style="color:var(--dim)">自動派工行為</span>
+            <label>預約深度 <select id="qDepth">
+              <option value="0">0（做完才派）</option>
+              <option value="1" selected>1（先押一批）</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+            </select></label>
+            <label><input type="checkbox" id="preSw" checked> 允許 HOT 插單</label>
+          </div>
+          <div class="arow">
+            <span style="color:var(--dim)">批次跑分</span>
+            <label>天數 <input type="number" id="daysIn" value="20" min="1" max="200" step="1"></label>
+            <button id="runBench" class="go">▶ 開始跑分（全部策略）</button>
+            <span id="benchStatus"></span>
+          </div>
+          <div id="benchTable"></div>
+          <div id="benchChart"></div>
+        </div>
+      </details>
+    </div>
 
     <div class="panel" style="margin-top:12px">
       <details>
@@ -241,8 +309,19 @@ const PKGS = ["A","B","C"], PROGS = ["P1","P2","P3","P4"];
 
 /* ---------- 工具 ---------- */
 const $ = s => document.querySelector(s);
-const ri = (a,b) => a + Math.floor(Math.random()*(b-a+1));
-const rf = (a,b) => a + Math.random()*(b-a);
+// 可重現亂數：同一個種子 → 完全相同的貨批、良率與當機時間點，策略才比得公平
+function mulberry32(a){
+  return function(){
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+let rng = mulberry32(1);
+let SILENT = false;                 // 批次跑分時不畫面、不寫記錄
+const ri = (a,b) => a + Math.floor(rng()*(b-a+1));
+const rf = (a,b) => a + rng()*(b-a);
 const nf = n => Math.round(n).toLocaleString("en-US");
 const hhmm = t => String(Math.floor(t/60)).padStart(2,"0")+":"+String(Math.floor(t%60)).padStart(2,"0");
 
@@ -252,7 +331,7 @@ let S = null, timer = null, acc = 0;
 function newLot(arrive){
   const qty = Math.round(ri(P.qtyMin,P.qtyMax)/500)*500;
   const tpu = +rf(P.tpuMin,P.tpuMax).toFixed(2);
-  const hot = Math.random() < P.hotRate/100;
+  const hot = rng() < P.hotRate/100;
   // 交期 = 到貨 + 預估工時（T1 再加 30% retest 餘裕）× 寬鬆倍數
   const est = qty * tpu / 60 * 1.3;
   const slack = hot ? rf(P.hotSlackMin,P.hotSlackMax) : rf(P.dueSlackMin,P.dueSlackMax);
@@ -274,17 +353,20 @@ function newMachine(i){
     run:0, setup:0, down:0, idle:0, good:0, lots:0
   };
 }
-function init(){
-  S = { t:0, running:false, speed:1, ended:false, seq:1, lots:[], machines:[],
+function init(seed){
+  const sd = seed === undefined ? A.seed : seed;
+  rng = mulberry32(sd);
+  S = { seed:sd, t:0, running:false, speed:1, ended:false, seq:1, lots:[], machines:[],
         nextArrival:P.arrivalEvery, sel:null, log:[], good:0, lots_done:0,
         goodScore:0, penalty:0, onTime:0, lateDone:0, missed:0, sortBy:"due" };
   for (let i=0;i<P.machines;i++) S.machines.push(newMachine(i));
   for (let i=0;i<P.initialLots;i++) S.lots.push(newLot(0));
   acc = 0;
-  log("開工！WIP 已有 "+P.initialLots+" 批待派工");
+  log("開工！WIP 已有 "+P.initialLots+" 批待派工（情境種子 "+sd+"）");
   render();
 }
 function log(msg){
+  if (SILENT) return;
   S.log.unshift("["+hhmm(S.t)+"] "+msg);
   if (S.log.length > 60) S.log.pop();
 }
@@ -365,7 +447,7 @@ function stepMinute(){
     S.nextArrival = S.t + Math.max(10, Math.round(P.arrivalEvery * rf(0.6,1.4)));
   }
   for (const m of S.machines){
-    if (m.state !== "DOWN" && Math.random() < (P.downPerHour/100)/60){
+    if (m.state !== "DOWN" && rng() < (P.downPerHour/100)/60){
       m.prevState = m.state;
       m.state = "DOWN";
       m.remain_bak = m.remain;
@@ -404,6 +486,12 @@ function utilization(){
   const el = Math.max(1, S.t) * S.machines.length;
   let run = 0; for (const m of S.machines) run += m.run;
   return run / el * 100;
+}
+// 收工時未完成、但交期在今天內的批，一樣算逾期
+function finalizePenalty(){
+  const missedLots = S.lots.filter(l => l.state !== "DONE" && l.due <= DAY);
+  for (const l of missedLots) S.penalty += P.latePenalty * (l.hot ? 2 : 1);
+  S.missed = missedLots.length;
 }
 function score(){
   return Math.round(S.goodScore * (1 + utilization()/100 * P.utilWeight)) - S.penalty;
@@ -495,6 +583,7 @@ function convert(m, pkg, prog){
 
 /* ---------- 畫面 ---------- */
 function render(){
+  if (SILENT) return;
   $("#clock").textContent = hhmm(Math.min(S.t, DAY));
   $("#dayBar").style.width = (Math.min(S.t,DAY)/DAY*100)+"%";
   $("#kGood").textContent = nf(S.good);
@@ -595,6 +684,241 @@ function render(){
   $("#log").innerHTML = S.log.map(l => `<div>${l}</div>`).join("");
 }
 
+/* ---------- 排程演算法 ---------- */
+const A = { mode:"manual", policy:"edd", queueDepth:1, preempt:true,
+            wDue:1, wSetup:1, wSpt:0.5, wHot:3, days:20, seed:1 };
+
+// 這批貨在機台上的預估佔機時間（T1 + retest 餘裕）
+function estMin(lot){ return Math.max(1, Math.ceil(lot.qty * lot.tpu / 60 * 1.3)); }
+// 餘裕：現在接這批，離交期還剩多少緩衝（負值＝已經來不及）
+function slackMin(lot){ return lot.due - S.t - estMin(lot); }
+
+function compositeScore(lot, m){
+  return A.wDue   * (-slackMin(lot) / 60)
+       + A.wHot   * (lot.hot ? 1 : 0)
+       - A.wSetup * (tailCost(m, lot) / 60)
+       - A.wSpt   * (estMin(lot) / 60);
+}
+const POLICIES = [
+  { id:"fifo",  name:"FIFO 到貨順序",     desc:"誰先到誰先做。最單純的基準線，完全不看交期與改機。",
+    score:(l) => -l.arrive },
+  { id:"edd",   name:"EDD 最早交期",      desc:"永遠先做交期最早的批（Earliest Due Date）。對準時率通常最穩。",
+    score:(l) => -l.due },
+  { id:"spt",   name:"SPT 最短工時",      desc:"先做最快做完的批，衝完成批數與周轉，容易犧牲大批的交期。",
+    score:(l) => -estMin(l) },
+  { id:"hot",   name:"HOT 優先 → EDD",    desc:"優先批一律插前面，其餘照交期。",
+    score:(l) => (l.hot ? 1e7 : 0) - l.due },
+  { id:"setup", name:"Setup-aware 省改機", desc:"優先挑不用改機的批串在同一台機上，同成本時再比交期。",
+    score:(l, m) => -tailCost(m, l) * 1000 - l.due },
+  { id:"comp",  name:"Composite 加權",     desc:"交期緊迫度、改機成本、批量大小、HOT 四個因子加權評分，權重可調。",
+    score:(l, m) => compositeScore(l, m) }
+];
+function policyById(id){ return POLICIES.find(p => p.id === id) || POLICIES[1]; }
+
+function pickBest(wip, m, pol){
+  let best = null, bs = -Infinity;
+  for (const l of wip){ const v = pol.score(l, m); if (v > bs){ bs = v; best = l; } }
+  return best;
+}
+// HOT 快來不及了就插單，但只犧牲「就算重測也還趕得上」的批。
+// 候選不只看 WIP：已經被預約排在佇列裡的 HOT 批同樣可能卡在長批後面。
+function hotCandidates(){
+  const out = S.lots.filter(l => l.state === "WIP" && l.hot).map(l => ({lot:l, from:null}));
+  for (const m of S.machines)
+    m.queue.forEach(l => { if (l.hot) out.push({lot:l, from:m}); });
+  return out;
+}
+function autoPreempt(){
+  for (const c of hotCandidates()){
+    const h = c.lot, est = estMin(h);
+    if (h.due - S.t >= est + 60) continue;          // 還來得及等，不值得插單
+    let victim = null;
+    for (const m of S.machines){
+      if (m.state !== "RUN" || !m.lot || m.lot.hot) continue;
+      if (c.from === m && m.queue[0] === h) continue; // 本來就排在這台第一順位，等一下就輪到了
+      const v = m.lot;
+      // 被犧牲的批進度歸零要重測，所以用完整工時估它還來不來得及
+      if (v.due - (S.t + est) > estMin(v) + 60){
+        if (!victim || m.remain < victim.remain) victim = m;
+      }
+    }
+    if (!victim) continue;
+    if (c.from){                                     // 先把它從原本的預約佇列抽出來
+      const i = c.from.queue.indexOf(h);
+      if (i >= 0) c.from.queue.splice(i, 1);
+      h.state = "WIP"; h.machine = null;
+    }
+    preempt(victim, h);
+  }
+}
+function autoDispatch(){
+  const pol = policyById(A.policy);
+  let wip = S.lots.filter(l => l.state === "WIP");
+  if (wip.length){
+    for (const m of S.machines){
+      if (m.state === "IDLE" && !m.lot && wip.length){
+        const best = pickBest(wip, m, pol);
+        if (best){ assign(m, best); wip = wip.filter(l => l !== best); }
+      }
+    }
+    const depth = Math.min(A.queueDepth, P.queueMax);
+    for (const m of S.machines){
+      while (m.queue.length < depth && wip.length){
+        const best = pickBest(wip, m, pol);
+        if (!best) break;
+        enqueue(m, best); wip = wip.filter(l => l !== best);
+      }
+    }
+  }
+  if (A.preempt) autoPreempt();
+}
+
+/* ---------- 批次跑分 ---------- */
+function runDay(policyId, seed){
+  const keepS = S, keepRng = rng, keepSilent = SILENT, keepPol = A.policy;
+  SILENT = true; A.policy = policyId;
+  init(seed);
+  for (let i = 0; i < DAY; i++){ stepMinute(); autoDispatch(); }
+  finalizePenalty();
+  const r = {
+    score: score(), good: S.good, lots: S.lots_done,
+    onTime: S.onTime, late: S.lateDone + S.missed,
+    util: utilization(),
+    setup: S.machines.reduce((a,m) => a + m.setup, 0)
+  };
+  S = keepS; rng = keepRng; SILENT = keepSilent; A.policy = keepPol;
+  return r;
+}
+function runBatch(){
+  const days = Math.max(1, Math.min(200, +A.days || 20));
+  const jobs = [];
+  for (const pol of POLICIES) for (let sd = 1; sd <= days; sd++) jobs.push([pol.id, sd]);
+  const acc = {}; POLICIES.forEach(p => acc[p.id] = []);
+  let i = 0;
+  $("#runBench").disabled = true;
+  const step = () => {
+    const t0 = performance.now();
+    while (i < jobs.length && performance.now() - t0 < 80){
+      const [pid, sd] = jobs[i++];
+      acc[pid].push(runDay(pid, sd));
+    }
+    $("#benchStatus").textContent = `跑分中… ${i}/${jobs.length}`;
+    if (i < jobs.length) setTimeout(step, 0);
+    else {
+      $("#benchStatus").textContent = `完成：${POLICIES.length} 個策略 × ${days} 天（同一組情境種子 1~${days}）`;
+      $("#runBench").disabled = false;
+      showBench(acc, days);
+    }
+  };
+  setTimeout(step, 0);
+}
+const avg = a => a.reduce((x,y) => x+y, 0) / a.length;
+
+function showBench(acc, days){
+  const rows = POLICIES.map(p => {
+    const r = acc[p.id], sc = r.map(x => x.score);
+    return { p, sc,
+      avgScore: avg(sc), min: Math.min(...sc), max: Math.max(...sc),
+      good: avg(r.map(x => x.good)),
+      onTimeRate: avg(r.map(x => x.onTime / Math.max(1, x.onTime + x.late) * 100)),
+      util: avg(r.map(x => x.util)), setup: avg(r.map(x => x.setup)),
+      late: avg(r.map(x => x.late)) };
+  }).sort((a,b) => b.avgScore - a.avgScore);
+
+  $("#benchTable").innerHTML =
+    `<table><tr><th>策略</th><th>平均分數</th><th>最低</th><th>最高</th><th>平均良品</th>
+       <th>準時率</th><th>稼動率</th><th>改機分鐘</th><th>逾期批/天</th></tr>`
+    + rows.map((r,i) => `<tr class="${i===0?"best":""}"><td>${r.p.name}</td>
+        <td>${nf(r.avgScore)}</td><td>${nf(r.min)}</td><td>${nf(r.max)}</td>
+        <td>${nf(r.good)}</td><td>${r.onTimeRate.toFixed(0)}%</td>
+        <td>${r.util.toFixed(1)}%</td><td>${nf(r.setup)}</td>
+        <td>${r.late.toFixed(1)}</td></tr>`).join("")
+    + `</table>`;
+  drawChart(rows, days);
+}
+
+/* 每日分數分佈：同一個種子 = 同一天的情境，各策略配對比較 */
+const SERIES = ["#3987e5","#d95926","#199e70","#c98500","#d55181","#008300"];
+const hidden = new Set();                  // 圖例點掉的策略
+const hue = id => SERIES[POLICIES.findIndex(p => p.id === id) % SERIES.length];
+function drawChart(rows, days){
+  const shown = rows.filter(r => !hidden.has(r.p.id));
+  const W = 760, H = 250, padL = 58, padR = 14, padT = 12, padB = 28;
+  const all = (shown.length ? shown : rows).flatMap(r => r.sc);
+  let lo = Math.min(...all), hi = Math.max(...all);
+  const pad = (hi - lo) * 0.08 || 1000; lo -= pad; hi += pad;
+  const x = i => padL + (days === 1 ? 0 : i * (W - padL - padR) / (days - 1));
+  const y = v => padT + (1 - (v - lo) / (hi - lo)) * (H - padT - padB);
+  const kfmt = v => Math.abs(v) >= 10000 ? Math.round(v/1000)+"k" : nf(v);
+
+  const ticks = [0,1,2,3,4].map(i => lo + (hi-lo)*i/4);
+  const grid = ticks.map(v => `<line x1="${padL}" x2="${W-padR}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}"
+      stroke="#2b3442" stroke-width="1"/>
+      <text x="${padL-8}" y="${(y(v)+3.5).toFixed(1)}" text-anchor="end" fill="#8b949e" font-size="10">${kfmt(v)}</text>`).join("");
+  const xticks = [];
+  for (let i = 0; i < days; i++)
+    if (days <= 12 || i === 0 || i === days-1 || (i+1) % 5 === 0)
+      xticks.push(`<text x="${x(i).toFixed(1)}" y="${H-10}" text-anchor="middle" fill="#8b949e" font-size="10">${i+1}</text>`);
+
+  const lines = shown.map(r => {
+    const d = r.sc.map((v,i) => `${i?"L":"M"}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(" ");
+    return `<path d="${d}" fill="none" stroke="${hue(r.p.id)}" stroke-width="2"
+             stroke-linejoin="round" stroke-linecap="round"/>`;
+  }).join("");
+
+  const legend = rows.map(r =>
+    `<span class="${hidden.has(r.p.id)?"off":""}" data-leg="${r.p.id}">
+       <i style="background:${hue(r.p.id)}"></i>${r.p.name}</span>`).join("");
+
+  $("#benchChart").innerHTML =
+    `<div class="legend">${legend}</div>
+     <div class="chartWrap">
+       <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" id="bchart">
+         ${grid}${xticks}
+         <text x="${padL}" y="${H-10}" fill="#8b949e" font-size="10" opacity="0">.</text>
+         <line id="chx" y1="${padT}" y2="${H-padB}" stroke="#58a6ff" stroke-width="1" opacity="0"/>
+         ${lines}
+         <g id="chdots"></g>
+         <rect x="${padL}" y="${padT}" width="${W-padL-padR}" height="${H-padT-padB}"
+               fill="transparent" id="chhit"/>
+       </svg>
+       <div class="tip" id="chtip"></div>
+     </div>
+     <div class="adesc">橫軸＝情境種子（第幾天，各策略跑的是同一天），縱軸＝當天分數。滑過去看逐日對照，點圖例可單獨顯示或隱藏某個策略。</div>`;
+
+  $("#benchChart").querySelectorAll("[data-leg]").forEach(el => {
+    el.onclick = () => {
+      const id = el.dataset.leg;
+      hidden.has(id) ? hidden.delete(id) : hidden.add(id);
+      drawChart(rows, days);
+    };
+  });
+
+  const svg = $("#bchart"), hit = $("#chhit"), tip = $("#chtip"), cx = $("#chx"), dots = $("#chdots");
+  hit.addEventListener("mousemove", ev => {
+    const box = svg.getBoundingClientRect();
+    const px = (ev.clientX - box.left) / box.width * W;
+    let i = days === 1 ? 0 : Math.round((px - padL) / ((W - padL - padR) / (days - 1)));
+    i = Math.max(0, Math.min(days-1, i));
+    cx.setAttribute("x1", x(i)); cx.setAttribute("x2", x(i)); cx.setAttribute("opacity", ".7");
+    dots.innerHTML = shown.map(r =>
+      `<circle cx="${x(i)}" cy="${y(r.sc[i])}" r="4" fill="${hue(r.p.id)}"
+               stroke="#161b22" stroke-width="2"/>`).join("");
+    const ordered = shown.map(r => ({ name:r.p.name, v:r.sc[i], c:hue(r.p.id) }))
+      .sort((a,b) => b.v - a.v);
+    tip.innerHTML = `<b>第 ${i+1} 天（種子 ${i+1}）</b>`
+      + ordered.map(o => `<div><i style="background:${o.c}"></i>${o.name}　${nf(o.v)}</div>`).join("");
+    tip.style.opacity = 1;
+    const wrap = tip.parentElement.getBoundingClientRect();
+    const lx = (x(i) / W) * wrap.width;
+    tip.style.left = Math.min(wrap.width - tip.offsetWidth - 4, Math.max(0, lx + 12)) + "px";
+    tip.style.top = "8px";
+  });
+  hit.addEventListener("mouseleave", () => {
+    tip.style.opacity = 0; cx.setAttribute("opacity", 0); dots.innerHTML = "";
+  });
+}
+
 /* ---------- 迴圈 ---------- */
 function tick(){
   if (!S.running || S.ended) return;
@@ -603,6 +927,7 @@ function tick(){
   while (acc >= 1 && guard++ < 400){
     acc -= 1;
     stepMinute();
+    if (A.mode === "auto") autoDispatch();
     if (S.t >= DAY){ endGame(); break; }
   }
   render();
@@ -612,10 +937,7 @@ function endGame(){
   clearInterval(timer); timer = null;
   $("#btnPlay").textContent = "▶ 開始";
   $("#btnPlay").classList.add("go");
-  // 收工時未完成、但交期在今天內的批，一樣算逾期
-  const missedLots = S.lots.filter(l => l.state !== "DONE" && l.due <= DAY);
-  for (const l of missedLots) S.penalty += P.latePenalty * (l.hot ? 2 : 1);
-  S.missed = missedLots.length;
+  finalizePenalty();
   const u = utilization();
   const hotOk = S.lots.filter(l => l.state === "DONE" && l.hot && !l.late).length;
   const hotAll = S.lots.filter(l => l.hot).length;
@@ -731,7 +1053,30 @@ document.addEventListener("keydown", e => {
   if (e.code === "Space"){ e.preventDefault(); play(); }
 });
 
-buildParams(); syncRules(); init();
+function buildAlgo(){
+  $("#polSel").innerHTML = POLICIES.map(p =>
+    `<option value="${p.id}" ${p.id===A.policy?"selected":""}>${p.name}</option>`).join("");
+  const desc = () => { $("#polDesc").textContent = policyById(A.policy).desc; };
+  desc();
+  $("#polSel").onchange = e => { A.policy = e.target.value; desc(); };
+  $("#mMan").onclick  = () => { A.mode = "manual";
+    $("#mMan").classList.add("on"); $("#mAuto").classList.remove("on"); };
+  $("#mAuto").onclick = () => { A.mode = "auto";
+    $("#mAuto").classList.add("on"); $("#mMan").classList.remove("on");
+    if (!S.ended) autoDispatch(), render(); };
+  $("#seedApply").onclick = () => { A.seed = Math.max(1, +$("#seedIn").value || 1); reset(); };
+  $("#seedRnd").onclick   = () => { $("#seedIn").value = Math.floor(Math.random()*99999)+1; };
+  const w = (id, key, out) => {
+    $(id).oninput = e => { A[key] = +e.target.value; $(out).textContent = e.target.value; };
+  };
+  w("#wDue","wDue","#vDue"); w("#wSetup","wSetup","#vSetup");
+  w("#wSpt","wSpt","#vSpt"); w("#wHot","wHot","#vHot");
+  $("#qDepth").onchange = e => A.queueDepth = +e.target.value;
+  $("#preSw").onchange  = e => A.preempt = e.target.checked;
+  $("#daysIn").onchange = e => A.days = +e.target.value;
+  $("#runBench").onclick = runBatch;
+}
+buildParams(); buildAlgo(); syncRules(); init();
 </script>
 </body>
 </html>
