@@ -70,7 +70,16 @@
   .mc.DOWN{background:#4a171b;border-color:var(--down);animation:alarm 1.6s ease-in-out infinite}
   @keyframes alarm{0%,100%{box-shadow:0 0 0 0 rgba(248,81,73,0)}
                    50%{box-shadow:0 0 0 4px rgba(248,81,73,.35)}}
-  .mc .mh{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .mtop{display:flex;gap:10px;align-items:center;margin-bottom:8px}
+  .ring{width:54px;height:54px;flex:none}
+  .mid{flex:1;min-width:0}
+  .tl{margin-top:8px}
+  .tl svg{width:100%;height:13px;display:block;border-radius:3px;background:rgba(0,0,0,.4)}
+  .tlx{display:flex;justify-content:space-between;font-size:9px;color:var(--dim);margin-top:2px}
+  .tlleg{display:flex;flex-wrap:wrap;gap:12px;font-size:11px;color:var(--dim);margin-bottom:8px}
+  .tlleg span{display:flex;align-items:center;gap:5px}
+  .tlleg i{width:14px;height:8px;border-radius:2px;display:inline-block}
+  .mc .mh{display:flex;align-items:center;gap:8px;margin-bottom:4px}
   .mc .cfg,.mc .mstat{color:#c9d1d9}
   .mc select,.mc .tools button{background:rgba(0,0,0,.3)}
   .mc .mh b{font-size:15px}
@@ -79,10 +88,6 @@
   .st.RUN{background:var(--run);color:#fff}.st.DOWN{background:var(--down);color:#fff}
   .cfg{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--dim);margin-bottom:6px}
   .job{background:rgba(0,0,0,.3);border-radius:6px;padding:6px 8px;min-height:52px;font-size:12px}
-  .bar{height:8px;background:rgba(0,0,0,.45);border-radius:4px;overflow:hidden;margin-top:6px}
-  .bar div{height:100%;width:0;background:var(--run)}
-  .bar.SETUP div{background:var(--setup)}.bar.DOWN div{background:var(--down)}
-  .bar.RT div{background:var(--rt)}
   .mstat{display:flex;gap:10px;color:var(--dim);font-size:11px;margin-top:6px;
          font-variant-numeric:tabular-nums;flex-wrap:wrap}
   .tools{display:flex;gap:4px;margin-top:8px}
@@ -198,6 +203,14 @@
   </div>
 
   <div>
+    <div class="tlleg">
+      <span>今日稼動時間軸</span>
+      <span><i style="background:var(--run)"></i>測試</span>
+      <span><i style="background:var(--rt)"></i>Retest</span>
+      <span><i style="background:var(--setup)"></i>改機</span>
+      <span><i style="background:var(--down)"></i>當機</span>
+      <span><i style="background:#30363d"></i>閒置</span>
+    </div>
     <div id="lines"></div>
 
     <div class="panel" style="margin-top:12px">
@@ -445,7 +458,7 @@ function newMachine(i){
     id:i, name:"T"+(i+1),
     kit:able[i % able.length], prog:PROGS[i % PROGS.length],
     state:"IDLE", prevState:"IDLE", lot:null, phase:null,
-    remain:0, total:0, target:null, queue:[],
+    remain:0, total:0, target:null, queue:[], segs:[],
     run:0, setup:0, down:0, idle:0, good:0, lots:0
   };
 }
@@ -551,6 +564,7 @@ function stepMinute(){
       m.downRemain = ri(P.downMin, P.downMax);
       log("⚠ "+m.name+" 當機，預計 "+m.downRemain+" 分鐘");
     }
+    const before = m.state, wasRT = m.phase && m.phase !== "T1";
     switch(m.state){
       case "DOWN":
         m.down++; m.downRemain--;
@@ -576,6 +590,12 @@ function stepMinute(){
         if (!m.lot && m.queue.length){ takeNext(m); break; }
         m.idle++;
     }
+    // 記下這一分鐘這台機在做什麼，合併成連續區段供時間軸使用
+    const code = before === "DOWN" ? "DOWN" : before === "SETUP" ? "SETUP"
+               : before === "RUN" ? (wasRT ? "RT" : "RUN") : "IDLE";
+    const last = m.segs[m.segs.length-1];
+    if (last && last.c === code) last.b = S.t;
+    else m.segs.push({ c:code, a:S.t-1, b:S.t });
   }
 }
 
@@ -687,6 +707,47 @@ function convert(m, pkg, prog){
   render();
 }
 
+/* ---------- 機台圖示・圓環進度・全天時間軸 ---------- */
+const STATE_COLOR = { RUN:"var(--run)", RT:"var(--rt)", SETUP:"var(--setup)",
+                      DOWN:"var(--down)", IDLE:"#30363d" };
+// 簡潔的測試機線條圖：機殼 + 螢幕 + handler 送料臂
+function testerIcon(color){
+  return `<g stroke="${color}" stroke-width="1.6" fill="none" stroke-linejoin="round" stroke-linecap="round">
+      <rect x="15" y="17" width="18" height="15" rx="2"/>
+      <line x1="15" y1="22" x2="33" y2="22"/>
+      <circle cx="18.5" cy="19.5" r="1" fill="${color}" stroke="none"/>
+      <rect x="18.5" y="25" width="5" height="4" rx="1"/>
+      <path d="M26 25.5h4M26 28h4"/>
+      <path d="M24 32v3M19 35h10"/>
+    </g>`;
+}
+function ringSVG(m, pct){
+  const cls = (m.state === "RUN" && m.phase && m.phase !== "T1") ? "RT" : m.state;
+  const col = STATE_COLOR[cls] || "#30363d";
+  const C = 2 * Math.PI * 20;
+  const p = Math.max(0, Math.min(1, pct/100));
+  return `<svg class="ring" viewBox="0 0 48 48" aria-hidden="true">
+    <circle cx="24" cy="24" r="20" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="3.5"/>
+    ${m.total ? `<circle cx="24" cy="24" r="20" fill="none" stroke="${col}" stroke-width="3.5"
+        stroke-linecap="round" stroke-dasharray="${C.toFixed(1)}"
+        stroke-dashoffset="${(C*(1-p)).toFixed(1)}" transform="rotate(-90 24 24)"/>` : ""}
+    ${testerIcon(col)}
+  </svg>`;
+}
+// 一整天 1440 分鐘的狀態分佈，現在時間用白線標出
+function timelineSVG(m){
+  const segs = m.segs.map(g =>
+    `<rect x="${g.a}" y="0" width="${Math.max(1, g.b-g.a)}" height="10"
+       fill="${STATE_COLOR[g.c]}"><title>${hhmm(g.a)}–${hhmm(g.b)} ${
+       {RUN:"測試",RT:"Retest",SETUP:"改機",DOWN:"當機",IDLE:"閒置"}[g.c]}（${g.b-g.a} 分）</title></rect>`).join("");
+  const now = Math.min(S.t, DAY);
+  return `<svg viewBox="0 0 ${DAY} 10" preserveAspectRatio="none">
+      ${segs}
+      <line x1="${now}" x2="${now}" y1="0" y2="10" stroke="#e6edf3" stroke-width="4"/>
+    </svg>
+    <div class="tlx"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div>`;
+}
+
 /* ---------- 畫面 ---------- */
 function render(){
   if (SILENT) return;
@@ -733,8 +794,6 @@ function render(){
            : `<span class="hint pkg">${pre}換 Kit ${c} 分</span>`;
     }
     const pct = m.total ? (1 - m.remain/m.total)*100 : 0;
-    const barCls = m.state === "DOWN" ? "DOWN" : m.state === "SETUP" ? "SETUP"
-                 : (m.phase && m.phase !== "T1") ? "RT" : "";
     let job = `<span style="color:var(--dim)">待命中 — 可派工或預先改機</span>`;
     if (m.state === "DOWN")
       job = `<b style="color:var(--down)">當機維修中</b><br>剩 ${m.downRemain} 分`
@@ -754,10 +813,16 @@ function render(){
     return `
     <div class="mc ${stateCls} ${canTake?"target":""}" data-m="${m.id}">
       ${hint}
-      <div class="mh"><b>${m.name}</b><span class="st ${m.state}">${m.state}</span></div>
-      <div class="cfg">Kit <span class="tag pkg${m.kit}">${m.kit}</span> 程式 <span class="prog">${m.prog}</span>
-        <span style="margin-left:auto;font-size:10px">可測 ${(P.cap[m.id]||"").split("").join("·")}</span></div>
-      <div class="job">${job}<div class="bar ${barCls}"><div style="width:${pct}%"></div></div></div>
+      <div class="mtop">
+        ${ringSVG(m, pct)}
+        <div class="mid">
+          <div class="mh"><b>${m.name}</b>${m.total ? `<span style="font-size:11px;color:var(--dim)">${Math.round(pct)}%</span>` : ""}<span class="st ${m.state}">${m.state}</span></div>
+          <div class="cfg">Kit <span class="tag pkg${m.kit}">${m.kit}</span> 程式 <span class="prog">${m.prog}</span>
+            <span style="margin-left:auto;font-size:10px">可測 ${(P.cap[m.id]||"").split("").join("·")}</span></div>
+        </div>
+      </div>
+      <div class="job">${job}</div>
+      <div class="tl">${timelineSVG(m)}</div>
       <div class="mstat"><span>良品 ${nf(m.good)}</span><span>完成 ${m.lots} 批</span>
         <span>稼動 ${(m.run/Math.max(1,S.t)*100).toFixed(0)}%</span>
         <span>改機 ${m.setup} 分</span><span>當機 ${m.down} 分</span></div>
