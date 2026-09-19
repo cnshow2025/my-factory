@@ -10,6 +10,7 @@
     --txt:#e6edf3; --dim:#8b949e;
     --idle:#6e7681; --setup:#d29922; --run:#2ea043; --down:#f85149; --rt:#a371f7;
     --pkgA:#388bfd; --pkgB:#a371f7; --pkgC:#f0883e;
+    --pkgD:#199e70; --pkgE:#c98500; --pkgF:#d55181;
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--txt);
@@ -53,6 +54,7 @@
   .lot .r2{color:var(--dim);font-size:11px;margin-top:3px;font-variant-numeric:tabular-nums}
   .tag{font-size:11px;padding:1px 6px;border-radius:4px;font-weight:700;color:#fff}
   .pkgA{background:var(--pkgA)}.pkgB{background:var(--pkgB)}.pkgC{background:var(--pkgC)}
+  .pkgD{background:var(--pkgD)}.pkgE{background:var(--pkgE)}.pkgF{background:var(--pkgF)}
   .prog{font-size:11px;padding:1px 6px;border-radius:4px;background:#30363d;color:#c9d1d9}
   #lines{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
   .mc{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px;position:relative}
@@ -233,6 +235,12 @@
     <div class="panel" style="margin-top:12px">
       <details>
         <summary>⚙ 背景參數（重新開始後套用批量/機台設定，其餘即時生效）</summary>
+        <div class="arow" style="margin-top:10px">
+          <label>參數組 <select id="presetSel"></select></label>
+          <button id="presetApply">套用</button>
+          <button id="presetSave">💾 存成「我的工廠」</button>
+        </div>
+        <div class="adesc" id="presetDesc" style="margin-top:6px"></div>
         <div id="params" style="margin-top:10px"></div>
       </details>
     </div>
@@ -283,7 +291,7 @@ const DEF = {
   initialLots:6, arrivalEvery:70, arrivalBatch:2,
   qtyMin:2000, qtyMax:10000, tpuMin:0.8, tpuMax:1.8,
   utilWeight:0.3,
-  queueMax:4,
+  pkgTypes:3, progTypes:4, queueMax:4,
   hotRate:18, hotBonus:1.5, latePenalty:5000,
   dueSlackMin:2.5, dueSlackMax:4.0, hotSlackMin:1.3, hotSlackMax:1.8
 };
@@ -298,6 +306,7 @@ const LABEL = {
   qtyMin:["批量下限","顆"], qtyMax:["批量上限","顆"],
   tpuMin:["單顆測試下限","秒"], tpuMax:["單顆測試上限","秒"],
   utilWeight:["稼動率加權","×"],
+  pkgTypes:["封裝種類數","種"], progTypes:["測試程式種類數","種"],
   queueMax:["每台預約上限","批"],
   hotRate:["優先批比例","%"], hotBonus:["Hot 準時加成","×"], latePenalty:["逾期扣分","分/批"],
   dueSlackMin:["一般交期寬鬆下限","×工時"], dueSlackMax:["一般交期寬鬆上限","×工時"],
@@ -305,7 +314,13 @@ const LABEL = {
 };
 const P = Object.assign({}, DEF);
 const DAY = 1440;
-const PKGS = ["A","B","C"], PROGS = ["P1","P2","P3","P4"];
+const PKG_ALL = ["A","B","C","D","E","F"];
+const PROG_ALL = ["P1","P2","P3","P4","P5","P6","P7","P8"];
+let PKGS = PKG_ALL.slice(0,3), PROGS = PROG_ALL.slice(0,4);
+function applyTypes(){
+  PKGS = PKG_ALL.slice(0, Math.max(1, Math.min(6, Math.round(P.pkgTypes))));
+  PROGS = PROG_ALL.slice(0, Math.max(1, Math.min(8, Math.round(P.progTypes))));
+}
 
 /* ---------- 工具 ---------- */
 const $ = s => document.querySelector(s);
@@ -356,6 +371,7 @@ function newMachine(i){
 function init(seed){
   const sd = seed === undefined ? A.seed : seed;
   rng = mulberry32(sd);
+  applyTypes();
   S = { seed:sd, t:0, running:false, speed:1, ended:false, seq:1, lots:[], machines:[],
         nextArrival:P.arrivalEvery, sel:null, log:[], good:0, lots_done:0,
         goodScore:0, penalty:0, onTime:0, lateDone:0, missed:0, sortBy:"due" };
@@ -975,6 +991,52 @@ function reset(){
   init();
 }
 
+/* ---------- 參數 Preset ---------- */
+const PRESETS = [
+  { id:"game", name:"遊戲預設（平衡好玩）",
+    desc:"預設值，貨批短、當機多，五分鐘一局節奏緊湊。",
+    P:Object.assign({}, DEF) },
+  { id:"myfab", name:"我的工廠（實機參數）",
+    desc:"依現場實際條件設定：5 台測試機、換 Kit 60 分、換程式 30 分、良率 80~99%、RT 門檻 99/98。" +
+         "批量、單顆測試時間、當機頻率、到貨量、逾期成本請依實際數字調整後按「存成我的工廠」。",
+    P:Object.assign({}, DEF, {
+      machines:5, setupPkg:60, setupProg:30,
+      pkgTypes:3, progTypes:4,
+      yieldMin:80, yieldMax:99, gate1:99, gate2:98,
+      recoverMin:40, recoverMax:80,
+      downPerHour:8, downMin:10, downMax:120,
+      qtyMin:2000, qtyMax:10000, tpuMin:0.8, tpuMax:1.8,
+      arrivalEvery:70, arrivalBatch:2, initialLots:6,
+      hotRate:18, hotBonus:1.5, latePenalty:5000,
+      realSeconds:300
+    }) }
+];
+const LS_KEY = "myfactory.preset.myfab";
+function loadSavedPreset(){
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (raw) Object.assign(PRESETS[1].P, JSON.parse(raw));
+  } catch(e){ /* 私密視窗或封鎖儲存時忽略 */ }
+}
+function applyPreset(id){
+  const pre = PRESETS.find(x => x.id === id);
+  if (!pre) return;
+  Object.assign(P, pre.P);
+  applyTypes(); buildParams(); syncRules();
+  $("#presetDesc").textContent = pre.desc;
+  reset();
+}
+function savePreset(){
+  Object.assign(PRESETS[1].P, P);
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify(PRESETS[1].P));
+    $("#presetDesc").textContent = "已把目前所有參數存成「我的工廠」（存在這台瀏覽器裡，下次開啟自動帶入）。";
+  } catch(e){
+    $("#presetDesc").textContent = "這個瀏覽器不允許儲存，設定只在本次有效。";
+  }
+  $("#presetSel").value = "myfab";
+}
+
 /* ---------- 參數面板 ---------- */
 function buildParams(){
   $("#params").innerHTML = Object.keys(DEF).map(k =>
@@ -984,7 +1046,7 @@ function buildParams(){
     const k = e.target.dataset.p; if (!k) return;
     const v = parseFloat(e.target.value);
     if (!isNaN(v)) P[k] = v;
-    syncRules(); render();
+    applyTypes(); syncRules(); render();
   });
 }
 function syncRules(){
@@ -1076,7 +1138,14 @@ function buildAlgo(){
   $("#daysIn").onchange = e => A.days = +e.target.value;
   $("#runBench").onclick = runBatch;
 }
-buildParams(); buildAlgo(); syncRules(); init();
+function buildPresetUI(){
+  $("#presetSel").innerHTML = PRESETS.map(x => `<option value="${x.id}">${x.name}</option>`).join("");
+  $("#presetDesc").textContent = PRESETS[0].desc;
+  $("#presetApply").onclick = () => applyPreset($("#presetSel").value);
+  $("#presetSave").onclick = savePreset;
+}
+loadSavedPreset(); applyTypes();
+buildParams(); buildAlgo(); buildPresetUI(); syncRules(); init();
 </script>
 </body>
 </html>
