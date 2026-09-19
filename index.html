@@ -68,6 +68,10 @@
   .mc.RUN{background:#0f3a1e;border-color:var(--run)}
   .mc.RT{background:#2b1d4d;border-color:var(--rt)}
   .mc.DOWN{background:#4a171b;border-color:var(--down);animation:alarm 1.6s ease-in-out infinite}
+  .mc.WAITSET{background:#251d09;border-color:rgba(210,153,34,.45)}
+  .mc.WAITFIX{background:#2c1214;border-color:rgba(248,81,73,.45)}
+  .st.WAITSET{background:rgba(210,153,34,.55);color:#0d1117}
+  .st.WAITFIX{background:rgba(248,81,73,.55);color:#fff}
   @keyframes alarm{0%,100%{box-shadow:0 0 0 0 rgba(248,81,73,0)}
                    50%{box-shadow:0 0 0 4px rgba(248,81,73,.35)}}
   .mtop{display:flex;gap:10px;align-items:center;margin-bottom:8px}
@@ -238,6 +242,7 @@
     <div><i>完成批數</i><b id="kLots">0</b></div>
     <div><i>稼動率</i><b id="kUtil">0%</b></div>
     <div><i>分數</i><b id="kScore">0</b></div>
+    <div><i>工程師</i><b id="kEng">0/0</b></div>
     <div><i>逾期扣分</i><b id="kPen">0</b></div>
     <div><i>WIP 待派</i><b id="kWip">0</b></div>
   </div>
@@ -275,6 +280,8 @@
       <span><i style="background:var(--rt)"></i>Retest</span>
       <span><i style="background:var(--setup)"></i>改機</span>
       <span><i style="background:var(--down)"></i>當機</span>
+      <span><i style="background:rgba(210,153,34,.40)"></i>等工程師(改機)</span>
+      <span><i style="background:rgba(248,81,73,.40)"></i>等工程師(維修)</span>
       <span><i style="background:#30363d"></i>閒置</span>
     </div>
     <div id="lines"></div>
@@ -393,7 +400,7 @@ const DEF = {
   qtyBigMin:10000, qtyBigMax:25000,
   tpuMin:0.8, tpuMax:1.8,
   utilWeight:0.3,
-  dueRule:"work", pkgTypes:3, progTypes:4, queueMax:4,
+  engineers:3, dueRule:"work", pkgTypes:3, progTypes:4, queueMax:4,
   hotRate:18, hotBonus:1.5, latePenalty:5000,
   dueSlackMin:2.5, dueSlackMax:4.0, hotSlackMin:1.3, hotSlackMax:1.8,
   dueSmallH:8, dueMidH:16, dueBigH:36, dueFlatH:16, dueBufferH:6, dueHotFactor:0.5
@@ -413,7 +420,7 @@ const LABEL = {
   tpuMin:["單顆測試下限","秒"], tpuMax:["單顆測試上限","秒"],
   utilWeight:["稼動率加權","×"],
   pkgTypes:["封裝種類數","種"], progTypes:["測試程式種類數","種"],
-  queueMax:["每台預約上限","批"],
+  engineers:["工程師人數","人"], queueMax:["每台預約上限","批"],
   hotRate:["優先批比例","%"], hotBonus:["Hot 準時加成","×"], latePenalty:["逾期扣分","分/批"],
   dueSlackMin:["一般交期寬鬆下限","×工時"], dueSlackMax:["一般交期寬鬆上限","×工時"],
   hotSlackMin:["Hot 交期寬鬆下限","×工時"], hotSlackMax:["Hot 交期寬鬆上限","×工時"],
@@ -526,7 +533,8 @@ function newMachine(i){
     kit:able[i % able.length], prog:PROGS[i % PROGS.length],
     state:"IDLE", prevState:"IDLE", lot:null, phase:null,
     remain:0, total:0, target:null, queue:[], segs:[],
-    run:0, setup:0, down:0, idle:0, good:0, lots:0
+    eng:false, waitSince:null,
+    run:0, setup:0, down:0, idle:0, wait:0, good:0, lots:0
   };
 }
 function init(seed){
@@ -534,7 +542,7 @@ function init(seed){
   rng = mulberry32(sd);
   applyTypes(); normalizeCap();
   S = { seed:sd, t:0, running:false, speed:1, ended:false, seq:1, lots:[], machines:[],
-        nextArrival:P.arrivalEvery, sel:null, log:[], good:0, lots_done:0,
+        nextArrival:P.arrivalEvery, sel:null, log:[], good:0, lots_done:0, engBusy:0,
         goodScore:0, penalty:0, onTime:0, lateDone:0, missed:0, sortBy:"due" };
   for (let i=0;i<P.machines;i++) S.machines.push(newMachine(i));
   for (let i=0;i<P.initialLots;i++) S.lots.push(newLot(0));
@@ -614,6 +622,27 @@ function finishPhase(m){
   takeNext(m);
 }
 
+// 改機與當機維修都要一位工程師；人不夠時機台停著等（當機優先，其次等最久的）
+function assignEngineers(){
+  const need = m => m.state === "SETUP" || m.state === "DOWN";
+  for (const m of S.machines)
+    if (m.eng && !need(m)){ m.eng = false; S.engBusy--; m.waitSince = null; }
+  const wanting = S.machines.filter(m => need(m) && !m.eng);
+  wanting.sort((a,b) =>
+    (a.state === "DOWN" ? 0 : 1) - (b.state === "DOWN" ? 0 : 1)
+    || (a.waitSince ?? S.t) - (b.waitSince ?? S.t));
+  for (const m of wanting){
+    if (S.engBusy < P.engineers){
+      m.eng = true; S.engBusy++;
+      if (m.waitSince !== null) log("🔧 工程師到位：" + m.name);
+      m.waitSince = null;
+    } else if (m.waitSince === null){
+      m.waitSince = S.t;
+      log("⏳ " + m.name + " 等工程師（" + (m.state === "DOWN" ? "維修" : "改機") + "）");
+    }
+  }
+}
+
 function stepMinute(){
   S.t++;
   if (S.t < DAY && S.t >= S.nextArrival){
@@ -623,6 +652,7 @@ function stepMinute(){
     log("客戶到貨 "+n+" 批"+(hots ? "（其中 "+hots+" 批 HOT 優先批）" : ""));
     S.nextArrival = S.t + Math.max(10, Math.round(P.arrivalEvery * rf(0.6,1.4)));
   }
+  // 先跑當機判定，再統一配置工程師，最後才推進各機台這一分鐘
   for (const m of S.machines){
     if (m.state !== "DOWN" && rng() < (P.downPerHour/100)/60){
       m.prevState = m.state;
@@ -631,11 +661,15 @@ function stepMinute(){
       m.downRemain = ri(P.downMin, P.downMax);
       log("⚠ "+m.name+" 當機，預計 "+m.downRemain+" 分鐘");
     }
-    const before = m.state, wasRT = m.phase && m.phase !== "T1";
+  }
+  assignEngineers();
+  for (const m of S.machines){
+    const before = m.state, wasRT = m.phase && m.phase !== "T1", hadEng = m.eng;
     const beforePhase = m.phase, beforeLot = m.lot ? m.lot.id : null;
     const beforeTarget = m.target ? m.target.pkg+"/"+m.target.prog : null;
     switch(m.state){
       case "DOWN":
+        if (!m.eng){ m.wait++; break; }      // 沒工程師，維修不會進行
         m.down++; m.downRemain--;
         if (m.downRemain <= 0){
           m.state = m.prevState === "DOWN" ? "IDLE" : m.prevState;
@@ -643,6 +677,7 @@ function stepMinute(){
         }
         break;
       case "SETUP":
+        if (!m.eng){ m.wait++; break; }      // 沒工程師，改機不會開始
         m.setup++; m.remain--;
         if (m.remain <= 0){
           m.kit = m.target.pkg; m.prog = m.target.prog; m.target = null;
@@ -660,9 +695,13 @@ function stepMinute(){
         m.idle++;
     }
     // 記下這一分鐘這台機在做什麼（含當時那批貨），合併成連續區段供時間軸使用
-    const code = before === "DOWN" ? "DOWN" : before === "SETUP" ? "SETUP"
-               : before === "RUN" ? (wasRT ? "RT" : "RUN") : "IDLE";
-    const label = code === "DOWN"  ? "當機維修" + (beforeLot ? "（"+beforeLot+" 暫停）" : "")
+    const code = before === "DOWN"  ? (hadEng ? "DOWN" : "WAITFIX")
+               : before === "SETUP" ? (hadEng ? "SETUP" : "WAITSET")
+               : before === "RUN"   ? (wasRT ? "RT" : "RUN") : "IDLE";
+    const label = code === "WAITFIX" ? "等工程師（維修）" + (beforeLot ? "（"+beforeLot+" 暫停）" : "")
+                : code === "WAITSET" ? "等工程師（改機"
+                                     + (beforeTarget ? " → "+beforeTarget : "") + "）"
+                : code === "DOWN"  ? "當機維修" + (beforeLot ? "（"+beforeLot+" 暫停）" : "")
                 : code === "SETUP" ? "改機" + (beforeTarget ? " → "+beforeTarget : "")
                                    + (beforeLot ? "（準備 "+beforeLot+"）" : "")
                 : code === "IDLE"  ? "閒置待料"
@@ -783,7 +822,9 @@ function convert(m, pkg, prog){
 
 /* ---------- 機台圖示・圓環進度・全天時間軸 ---------- */
 const STATE_COLOR = { RUN:"var(--run)", RT:"var(--rt)", SETUP:"var(--setup)",
-                      DOWN:"var(--down)", IDLE:"#30363d" };
+                      DOWN:"var(--down)", IDLE:"#30363d",
+                      // 等工程師：同色系但淡一階，代表機器停著純粹在等人
+                      WAITSET:"rgba(210,153,34,.40)", WAITFIX:"rgba(248,81,73,.40)" };
 // 簡潔的測試機線條圖：機殼 + 螢幕 + handler 送料臂
 function testerIcon(color){
   return `<g stroke="${color}" stroke-width="1.6" fill="none" stroke-linejoin="round" stroke-linecap="round">
@@ -795,8 +836,17 @@ function testerIcon(color){
       <path d="M24 32v3M19 35h10"/>
     </g>`;
 }
+// 畫面上的狀態：Retest 與「等工程師」都要跟原本的狀態分開
+function visualState(m){
+  if (m.state === "RUN" && m.phase && m.phase !== "T1") return "RT";
+  if (m.state === "SETUP" && !m.eng) return "WAITSET";
+  if (m.state === "DOWN"  && !m.eng) return "WAITFIX";
+  return m.state;
+}
+const STATE_LABEL = { RUN:"RUN", RT:"RUN", SETUP:"SETUP", DOWN:"DOWN", IDLE:"IDLE",
+                      WAITSET:"等工程師", WAITFIX:"等工程師" };
 function ringSVG(m, pct){
-  const cls = (m.state === "RUN" && m.phase && m.phase !== "T1") ? "RT" : m.state;
+  const cls = visualState(m);
   const col = STATE_COLOR[cls] || "#30363d";
   const C = 2 * Math.PI * 20;
   const p = Math.max(0, Math.min(1, pct/100));
@@ -839,6 +889,8 @@ function render(){
   $("#kLots").textContent = S.lots_done;
   $("#kUtil").textContent = utilization().toFixed(0)+"%";
   $("#kScore").textContent = nf(score());
+  $("#kEng").textContent = S.engBusy + "/" + P.engineers;
+  $("#kEng").style.color = S.engBusy >= P.engineers ? "var(--setup)" : "";
   $("#kPen").textContent = S.penalty ? "-"+nf(S.penalty) : "0";
   $("#kPen").style.color = S.penalty ? "var(--down)" : "";
   const wip = S.lots.filter(l => l.state === "WIP")
@@ -878,12 +930,16 @@ function render(){
     const pct = m.total ? (1 - m.remain/m.total)*100 : 0;
     let job = `<span style="color:var(--dim)">待命中 — 可派工或預先改機</span>`;
     if (m.state === "DOWN")
-      job = `<b style="color:var(--down)">當機維修中</b><br>剩 ${m.downRemain} 分`
+      job = (m.eng ? `<b style="color:var(--down)">當機維修中</b><br>剩 ${m.downRemain} 分`
+                   : `<b style="color:var(--down);opacity:.75">等工程師（維修）</b>`
+                     + `<br><span style="color:var(--dim)">已等 ${S.t - m.waitSince} 分 · 維修還沒開始</span>`)
           + (m.lot ? `<br><span style="color:var(--dim)">${m.lot.id} 暫停</span>` : "");
     else if (m.state === "SETUP")
-      job = `<b style="color:var(--setup)">改機中</b> → ${m.target.pkg}/${m.target.prog}`
-          + (m.lot ? `<br><span style="color:var(--dim)">準備 ${m.lot.id}</span>` : "")
-          + `<br>剩 ${m.remain} 分`;
+      job = (m.eng ? `<b style="color:var(--setup)">改機中</b> → ${m.target.pkg}/${m.target.prog}`
+                     + `<br>剩 ${m.remain} 分`
+                   : `<b style="color:var(--setup);opacity:.75">等工程師（改機）</b> → ${m.target.pkg}/${m.target.prog}`
+                     + `<br><span style="color:var(--dim)">已等 ${S.t - m.waitSince} 分 · 改機還沒開始</span>`)
+          + (m.lot ? `<br><span style="color:var(--dim)">準備 ${m.lot.id}</span>` : "");
     else if (m.state === "RUN"){
       const d = dueInfo(m.lot);
       job = `<b>${m.lot.hot?`<span class="hotTag">HOT</span> `:""}${m.lot.id}</b> · ${nf(m.phase==="T1"?m.lot.qty:m.lot.pending)} 顆 · <b style="color:${m.phase==="T1"?"var(--run)":"var(--rt)"}">${m.phase}</b>`
@@ -891,7 +947,7 @@ function render(){
           + `<br>剩 ${m.remain} / ${m.total} 分 · 交期 ${dueFmt(m.lot.due)} <span class="due ${d.cls}">${d.txt}</span>`;
     }
     const opts = (arr,cur) => arr.map(v=>`<option ${v===cur?"selected":""}>${v}</option>`).join("");
-    const stateCls = (m.state === "RUN" && m.phase && m.phase !== "T1") ? "RT" : m.state;
+    const stateCls = visualState(m);
     const over = drag && drag.on && drag.overMi === m.id;
     const qHot = m.queue.some(l => l.hot);
     return `
@@ -901,7 +957,7 @@ function render(){
       <div class="mtop">
         ${ringSVG(m, pct)}
         <div class="mid">
-          <div class="mh"><b>${m.name}</b>${m.total ? `<span style="font-size:11px;color:var(--dim)">${Math.round(pct)}%</span>` : ""}<span class="st ${m.state}">${m.state}</span></div>
+          <div class="mh"><b>${m.name}</b>${m.total ? `<span style="font-size:11px;color:var(--dim)">${Math.round(pct)}%</span>` : ""}<span class="st ${stateCls}">${STATE_LABEL[stateCls]}</span></div>
           <div class="cfg">Kit <span class="tag pkg${m.kit}">${m.kit}</span> 程式 <span class="prog">${m.prog}</span>
             <span class="cap">可測 ${(P.cap[m.id]||"").split("").join("·")}</span></div>
         </div>
@@ -910,7 +966,8 @@ function render(){
       <div class="tl">${timelineSVG(m)}</div>
       <div class="mstat"><span>良品 ${nf(m.good)}</span><span>完成 ${m.lots} 批</span>
         <span>稼動 ${(m.run/Math.max(1,S.t)*100).toFixed(0)}%</span>
-        <span>改機 ${m.setup} 分</span><span>當機 ${m.down} 分</span></div>
+        <span>改機 ${m.setup} 分</span><span>當機 ${m.down} 分</span>
+        <span${m.wait ? ` style="color:var(--setup)"` : ""}>等人 ${m.wait} 分</span></div>
       <div class="tools">
         <select data-cvp="${m.id}" ${m.state!=="IDLE"||m.lot?"disabled":""}>${opts((P.cap[m.id]||"").split(""),m.kit)}</select>
         <select data-cvg="${m.id}" ${m.state!=="IDLE"||m.lot?"disabled":""}>${opts(PROGS,m.prog)}</select>
@@ -1216,7 +1273,8 @@ function endGame(){
   for (const m of S.machines)
     for (const g of m.segs) tot[g.c] += g.b - g.a;
   const totAll = Math.max(1, Object.values(tot).reduce((a,b) => a+b, 0));
-  const MIXNAME = { RUN:"測試", RT:"Retest", SETUP:"改機", DOWN:"當機", IDLE:"閒置" };
+  const MIXNAME = { RUN:"測試", RT:"Retest", SETUP:"改機", DOWN:"當機",
+                    WAITSET:"等工程師(改機)", WAITFIX:"等工程師(維修)", IDLE:"閒置" };
   $("#ovTimeline").innerHTML =
     `<h3>當天各機台稼動時間軸（00:00 → 24:00）</h3>`
     + S.machines.map(m => `<div class="ovrow">
@@ -1235,9 +1293,9 @@ function endGame(){
     + `</div>`;
 
   $("#ovTable").innerHTML =
-    `<table><tr><th>機台</th><th>良品</th><th>完成批</th><th>測試</th><th>改機</th><th>當機</th><th>閒置</th><th>稼動率</th></tr>`
+    `<table><tr><th>機台</th><th>良品</th><th>完成批</th><th>測試</th><th>改機</th><th>當機</th><th>等人</th><th>閒置</th><th>稼動率</th></tr>`
     + S.machines.map(m => `<tr><td>${m.name}</td><td>${nf(m.good)}</td><td>${m.lots}</td>
-        <td>${m.run}</td><td>${m.setup}</td><td>${m.down}</td><td>${m.idle}</td>
+        <td>${m.run}</td><td>${m.setup}</td><td>${m.down}</td><td>${m.wait}</td><td>${m.idle}</td>
         <td>${(m.run/DAY*100).toFixed(0)}%</td></tr>`).join("")
     + `</table>`;
   $("#ov").classList.add("show");
@@ -1269,7 +1327,7 @@ const PRESETS = [
          "換 Kit 60 分、換程式 30 分、良率 80~99%、RT 門檻 99/98、一天 24 小時三班。" +
          "當機率 5%/小時、Retest 救回率 60%、HOT 比例 10%、逾期一批扣 20,000 分。",
     P:Object.assign({}, DEF, {
-      machines:5, setupPkg:60, setupProg:30,
+      machines:5, engineers:3, setupPkg:60, setupProg:30,
       pkgTypes:5, progTypes:8,
       yieldMin:80, yieldMax:99, gate1:99, gate2:98,
       recoverMin:40, recoverMax:80,
