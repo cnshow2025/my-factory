@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyFactory — 測試機台排程模擬</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --line:#2b3442;
+    --txt:#e6edf3; --dim:#8b949e;
+    --idle:#6e7681; --setup:#d29922; --run:#2ea043; --down:#f85149; --rt:#a371f7;
+    --pkgA:#388bfd; --pkgB:#a371f7; --pkgC:#f0883e;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+       font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;font-size:14px}
+  header{position:sticky;top:0;z-index:20;background:var(--panel);border-bottom:1px solid var(--line);
+         padding:10px 16px;display:flex;flex-wrap:wrap;gap:16px;align-items:center}
+  h1{font-size:16px;margin:0;letter-spacing:1px}
+  h1 span{color:var(--dim);font-weight:400;font-size:12px;margin-left:6px}
+  .clock{font-size:26px;font-variant-numeric:tabular-nums;font-weight:700;min-width:96px}
+  .kpi{display:flex;gap:14px;flex-wrap:wrap}
+  .kpi div{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:4px 10px;min-width:82px}
+  .kpi b{display:block;font-size:16px;font-variant-numeric:tabular-nums}
+  .kpi i{font-style:normal;color:var(--dim);font-size:11px}
+  .ctrl{margin-left:auto;display:flex;gap:6px;align-items:center}
+  button{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;
+         padding:6px 12px;cursor:pointer;font-size:13px;font-family:inherit}
+  button:hover:not(:disabled){border-color:#58a6ff}
+  button:disabled{opacity:.35;cursor:not-allowed}
+  button.on{background:#1f6feb;border-color:#1f6feb}
+  button.go{background:#238636;border-color:#238636}
+  .dayline{height:3px;background:var(--line);width:100%}
+  .dayline div{height:100%;background:#1f6feb;width:0}
+  main{display:grid;grid-template-columns:300px 1fr;gap:12px;padding:12px;align-items:start}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px}
+  .panel>h2{font-size:13px;margin:0 0 8px;color:var(--dim);letter-spacing:1px;
+            display:flex;justify-content:space-between}
+  #wipList{display:flex;flex-direction:column;gap:6px;max-height:64vh;overflow:auto}
+  .lot{background:var(--panel2);border:1px solid var(--line);border-left:4px solid var(--line);
+       border-radius:6px;padding:7px 9px;cursor:pointer}
+  .lot:hover{border-color:#58a6ff}
+  .lot.sel{border-color:#58a6ff;background:#1b2c47;box-shadow:0 0 0 1px #58a6ff inset}
+  .lot .r1{display:flex;justify-content:space-between;align-items:center;gap:6px}
+  .lot .r2{color:var(--dim);font-size:11px;margin-top:3px;font-variant-numeric:tabular-nums}
+  .tag{font-size:11px;padding:1px 6px;border-radius:4px;font-weight:700;color:#fff}
+  .pkgA{background:var(--pkgA)}.pkgB{background:var(--pkgB)}.pkgC{background:var(--pkgC)}
+  .prog{font-size:11px;padding:1px 6px;border-radius:4px;background:#30363d;color:#c9d1d9}
+  #lines{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+  .mc{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px;position:relative}
+  .mc.target{border-color:#58a6ff;cursor:pointer}
+  .mc.target:hover{background:#151d2b}
+  .mc .mh{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .mc .mh b{font-size:15px}
+  .st{font-size:11px;padding:2px 8px;border-radius:10px;color:#0d1117;font-weight:700;margin-left:auto}
+  .st.IDLE{background:var(--idle);color:#fff}.st.SETUP{background:var(--setup)}
+  .st.RUN{background:var(--run);color:#fff}.st.DOWN{background:var(--down);color:#fff}
+  .cfg{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--dim);margin-bottom:6px}
+  .job{background:var(--panel2);border-radius:6px;padding:6px 8px;min-height:52px;font-size:12px}
+  .bar{height:8px;background:#0d1117;border-radius:4px;overflow:hidden;margin-top:6px}
+  .bar div{height:100%;width:0;background:var(--run)}
+  .bar.SETUP div{background:var(--setup)}.bar.DOWN div{background:var(--down)}
+  .bar.RT div{background:var(--rt)}
+  .mstat{display:flex;gap:10px;color:var(--dim);font-size:11px;margin-top:6px;
+         font-variant-numeric:tabular-nums;flex-wrap:wrap}
+  .tools{display:flex;gap:4px;margin-top:8px}
+  select{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:5px;
+         padding:4px;font-size:12px;font-family:inherit}
+  .hint{position:absolute;top:8px;right:8px;background:#1f6feb;color:#fff;font-size:11px;
+        padding:2px 7px;border-radius:10px;font-weight:700}
+  .hint.free{background:#238636}.hint.pkg{background:#9e6a03}
+  #log{height:120px;overflow:auto;font-size:12px;color:var(--dim);font-variant-numeric:tabular-nums}
+  #log div{padding:1px 0;border-bottom:1px solid #1b2129}
+  #params{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px}
+  #params label{display:flex;justify-content:space-between;gap:6px;align-items:center;font-size:12px;color:var(--dim)}
+  #params input{width:72px;background:var(--panel2);color:var(--txt);border:1px solid var(--line);
+                border-radius:5px;padding:3px 6px;font-family:inherit;text-align:right}
+  details summary{cursor:pointer;color:var(--dim);font-size:13px;letter-spacing:1px}
+  .ov{position:fixed;inset:0;background:rgba(5,8,13,.9);display:none;align-items:center;justify-content:center;z-index:50}
+  .ov.show{display:flex}
+  .ovbox{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:24px;
+         width:min(560px,92vw);max-height:88vh;overflow:auto}
+  .ovbox h2{margin:0 0 4px}
+  .score{font-size:44px;font-weight:800;color:#2ea043;font-variant-numeric:tabular-nums}
+  table{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px;font-variant-numeric:tabular-nums}
+  th,td{border-bottom:1px solid var(--line);padding:5px 4px;text-align:right}
+  th:first-child,td:first-child{text-align:left}
+  th{color:var(--dim);font-weight:500}
+  .rules{font-size:12px;color:var(--dim);line-height:1.7}
+  .rules code{background:var(--panel2);padding:1px 5px;border-radius:4px;color:#c9d1d9}
+  @media(max-width:820px){main{grid-template-columns:1fr}#wipList{max-height:30vh}}
+</style>
+</head>
+<body>
+<header>
+  <h1>MyFactory<span>測試機台排程模擬</span></h1>
+  <div class="clock" id="clock">00:00</div>
+  <div class="kpi">
+    <div><i>良品產出</i><b id="kGood">0</b></div>
+    <div><i>完成批數</i><b id="kLots">0</b></div>
+    <div><i>稼動率</i><b id="kUtil">0%</b></div>
+    <div><i>分數</i><b id="kScore">0</b></div>
+    <div><i>WIP 待派</i><b id="kWip">0</b></div>
+  </div>
+  <div class="ctrl">
+    <button id="btnPlay" class="go">▶ 開始</button>
+    <button data-spd="1" class="spd on">1x</button>
+    <button data-spd="2" class="spd">2x</button>
+    <button data-spd="4" class="spd">4x</button>
+    <button id="btnReset">↻ 重新開始</button>
+  </div>
+</header>
+<div class="dayline"><div id="dayBar"></div></div>
+
+<main>
+  <div>
+    <div class="panel">
+      <h2><span>WIP 待派工</span><span id="wipCnt">0</span></h2>
+      <div id="wipList"></div>
+    </div>
+    <div class="panel" style="margin-top:12px">
+      <h2>事件記錄</h2>
+      <div id="log"></div>
+    </div>
+  </div>
+
+  <div>
+    <div id="lines"></div>
+
+    <div class="panel" style="margin-top:12px">
+      <details>
+        <summary>⚙ 背景參數（重新開始後套用批量/機台設定，其餘即時生效）</summary>
+        <div id="params" style="margin-top:10px"></div>
+      </details>
+    </div>
+
+    <div class="panel" style="margin-top:12px">
+      <details open>
+        <summary>📋 玩法規則</summary>
+        <div class="rules" style="margin-top:8px">
+          <p>你是排程員。客戶的貨批整天陸續進 WIP，把貨批派到 5 台測試機，讓當天良品產出最大。</p>
+          <p><b>匹配規則</b>：機台上裝的 <code>Kit(Package)</code> 與 <code>測試程式</code> 要和貨批一致才能開測。<br>
+          ・Package 同 ＋ 程式同 → <code>0 分鐘</code>，直接開測<br>
+          ・Package 同 ＋ 程式不同 → 換程式 <code id="rSetupProg">30</code> 分鐘<br>
+          ・Package 不同 → 換 Kit <code id="rSetupPkg">60</code> 分鐘（含載入程式）</p>
+          <p><b>測試流程</b>：T1 測全批 → 良率隨機 <code id="rYield">80~99%</code> → 未達 <code id="rG1">99%</code> 時 fail 品進 RT1（只測 fail 顆數）→ 仍未達 <code id="rG2">98%</code> 再進 RT2 → 完成出貨。Retest 不用改機，但照樣佔機台時間。</p>
+          <p><b>當機</b>：每台機每小時有機率故障，修復 10~120 分鐘，修好後從中斷處續測。</p>
+          <p><b>操作</b>：點左邊貨批 → 點亮起的機台卡即派工（卡片右上角顯示要花的改機時間）。閒置機台也可以先用下方 <b>改機</b> 預先換好 Kit／程式卡位。</p>
+          <p><b>計分</b>：只有<u>當天完成的批</u>才計良品顆數。<code>分數 = 良品顆數 × (1 + 稼動率 × 加權)</code>，在製中的批不計分，所以別讓長批在收工時測到一半。</p>
+        </div>
+      </details>
+    </div>
+  </div>
+</main>
+
+<div class="ov" id="ov"><div class="ovbox">
+  <h2>🏁 收工結算</h2>
+  <div style="color:var(--dim);font-size:12px">一局 = 工廠一天 1440 分鐘</div>
+  <div class="score" id="ovScore">0</div>
+  <div id="ovSum" style="font-size:13px"></div>
+  <div id="ovTable"></div>
+  <div style="margin-top:16px;display:flex;gap:8px">
+    <button class="go" id="ovAgain">再玩一局</button>
+    <button id="ovClose">看看現場</button>
+  </div>
+</div></div>
+
+<script>
+"use strict";
+/* ---------- 參數 ---------- */
+const DEF = {
+  realSeconds:300, machines:5,
+  setupPkg:60, setupProg:30,
+  downPerHour:8, downMin:10, downMax:120,
+  yieldMin:80, yieldMax:99, gate1:99, gate2:98,
+  recoverMin:40, recoverMax:80,
+  initialLots:6, arrivalEvery:70, arrivalBatch:2,
+  qtyMin:2000, qtyMax:10000, tpuMin:0.8, tpuMax:1.8,
+  utilWeight:0.3
+};
+const LABEL = {
+  realSeconds:["一局實際秒數","秒"], machines:["機台數","台"],
+  setupPkg:["換 Kit 時間","分"], setupProg:["換程式時間","分"],
+  downPerHour:["當機機率/小時","%"], downMin:["當機最短","分"], downMax:["當機最長","分"],
+  yieldMin:["T1 良率下限","%"], yieldMax:["T1 良率上限","%"],
+  gate1:["T1 免 retest 門檻","%"], gate2:["RT1 免 RT2 門檻","%"],
+  recoverMin:["Retest 救回率下限","%"], recoverMax:["Retest 救回率上限","%"],
+  initialLots:["開局貨批數","批"], arrivalEvery:["到貨間隔","分"], arrivalBatch:["每次到貨","批"],
+  qtyMin:["批量下限","顆"], qtyMax:["批量上限","顆"],
+  tpuMin:["單顆測試下限","秒"], tpuMax:["單顆測試上限","秒"],
+  utilWeight:["稼動率加權","×"]
+};
+const P = Object.assign({}, DEF);
+const DAY = 1440;
+const PKGS = ["A","B","C"], PROGS = ["P1","P2","P3","P4"];
+
+/* ---------- 工具 ---------- */
+const $ = s => document.querySelector(s);
+const ri = (a,b) => a + Math.floor(Math.random()*(b-a+1));
+const rf = (a,b) => a + Math.random()*(b-a);
+const nf = n => Math.round(n).toLocaleString("en-US");
+const hhmm = t => String(Math.floor(t/60)).padStart(2,"0")+":"+String(Math.floor(t%60)).padStart(2,"0");
+
+/* ---------- 狀態 ---------- */
+let S = null, timer = null, acc = 0;
+
+function newLot(arrive){
+  const qty = Math.round(ri(P.qtyMin,P.qtyMax)/500)*500;
+  const tpu = +rf(P.tpuMin,P.tpuMax).toFixed(2);
+  return {
+    id:"L"+String(S.seq++).padStart(3,"0"),
+    pkg:PKGS[ri(0,PKGS.length-1)], prog:PROGS[ri(0,PROGS.length-1)],
+    qty, tpu, baseYield:+rf(P.yieldMin,P.yieldMax).toFixed(1),
+    arrive, state:"WIP", good:0, pending:0, cum:0, rt:0, machine:null
+  };
+}
+function newMachine(i){
+  return {
+    id:i, name:"T"+(i+1),
+    kit:PKGS[i % PKGS.length], prog:PROGS[i % PROGS.length],
+    state:"IDLE", prevState:"IDLE", lot:null, phase:null,
+    remain:0, total:0, target:null,
+    run:0, setup:0, down:0, idle:0, good:0, lots:0
+  };
+}
+function init(){
+  S = { t:0, running:false, speed:1, ended:false, seq:1, lots:[], machines:[],
+        nextArrival:P.arrivalEvery, sel:null, log:[], good:0, lots_done:0 };
+  for (let i=0;i<P.machines;i++) S.machines.push(newMachine(i));
+  for (let i=0;i<P.initialLots;i++) S.lots.push(newLot(0));
+  acc = 0;
+  log("開工！WIP 已有 "+P.initialLots+" 批待派工");
+  render();
+}
+function log(msg){
+  S.log.unshift("["+hhmm(S.t)+"] "+msg);
+  if (S.log.length > 60) S.log.pop();
+}
+
+/* ---------- 模擬 ---------- */
+function setupCost(m, pkg, prog){
+  if (m.kit !== pkg) return P.setupPkg;
+  if (m.prog !== prog) return P.setupProg;
+  return 0;
+}
+function phaseMinutes(lot, qty){ return Math.max(1, Math.ceil(qty * lot.tpu / 60)); }
+
+function startPhase(m, phase){
+  const lot = m.lot;
+  const qty = phase === "T1" ? lot.qty : lot.pending;
+  m.phase = phase;
+  m.total = m.remain = phaseMinutes(lot, qty);
+  m.state = "RUN";
+  lot.state = phase;
+  log(m.name+" 開始 "+phase+"："+lot.id+" "+nf(qty)+" 顆（約 "+m.total+" 分）");
+}
+function finishPhase(m){
+  const lot = m.lot;
+  if (m.phase === "T1"){
+    lot.good = Math.round(lot.qty * lot.baseYield/100);
+    lot.pending = lot.qty - lot.good;
+  } else {
+    const rec = rf(P.recoverMin, P.recoverMax)/100;
+    const back = Math.round(lot.pending * rec);
+    lot.good += back; lot.pending -= back; lot.rt++;
+  }
+  lot.cum = lot.good / lot.qty * 100;
+  const y = lot.cum.toFixed(1);
+  let next = null;
+  if (m.phase === "T1")      next = (lot.cum >= P.gate1 || lot.pending === 0) ? null : "RT1";
+  else if (m.phase === "RT1")next = (lot.cum >= P.gate2 || lot.pending === 0) ? null : "RT2";
+  log(m.name+" "+m.phase+" 完成："+lot.id+" 累積良率 "+y+"%"+(next ? " → 進 "+next : " → 出貨"));
+  if (next){ startPhase(m, next); return; }
+  lot.state = "DONE"; lot.machine = m.name;
+  m.good += lot.good; m.lots++;
+  S.good += lot.good; S.lots_done++;
+  m.lot = null; m.phase = null; m.state = "IDLE"; m.remain = m.total = 0;
+}
+
+function stepMinute(){
+  S.t++;
+  if (S.t < DAY && S.t >= S.nextArrival){
+    const n = ri(1, Math.max(1,P.arrivalBatch));
+    for (let i=0;i<n;i++) S.lots.push(newLot(S.t));
+    log("客戶到貨 "+n+" 批");
+    S.nextArrival = S.t + Math.max(10, Math.round(P.arrivalEvery * rf(0.6,1.4)));
+  }
+  for (const m of S.machines){
+    if (m.state !== "DOWN" && Math.random() < (P.downPerHour/100)/60){
+      m.prevState = m.state;
+      m.state = "DOWN";
+      m.remain_bak = m.remain;
+      m.downRemain = ri(P.downMin, P.downMax);
+      log("⚠ "+m.name+" 當機，預計 "+m.downRemain+" 分鐘");
+    }
+    switch(m.state){
+      case "DOWN":
+        m.down++; m.downRemain--;
+        if (m.downRemain <= 0){
+          m.state = m.prevState === "DOWN" ? "IDLE" : m.prevState;
+          log("🔧 "+m.name+" 修復完成，"+(m.state==="IDLE" ? "待命" : "續作"));
+        }
+        break;
+      case "SETUP":
+        m.setup++; m.remain--;
+        if (m.remain <= 0){
+          m.kit = m.target.pkg; m.prog = m.target.prog; m.target = null;
+          if (m.lot) startPhase(m, "T1");
+          else { m.state = "IDLE"; m.total = 0; log(m.name+" 改機完成 → Kit "+m.kit+" / "+m.prog); }
+        }
+        break;
+      case "RUN":
+        m.run++; m.remain--;
+        if (m.remain <= 0) finishPhase(m);
+        break;
+      default:
+        m.idle++;
+    }
+  }
+}
+
+function utilization(){
+  const el = Math.max(1, S.t) * S.machines.length;
+  let run = 0; for (const m of S.machines) run += m.run;
+  return run / el * 100;
+}
+function score(){ return Math.round(S.good * (1 + utilization()/100 * P.utilWeight)); }
+
+/* ---------- 操作 ---------- */
+function assign(m, lot){
+  if (m.state !== "IDLE" || m.lot) return;
+  m.lot = lot; lot.state = "ASSIGNED";
+  const cost = setupCost(m, lot.pkg, lot.prog);
+  if (cost > 0){
+    m.target = {pkg:lot.pkg, prog:lot.prog};
+    m.state = "SETUP"; m.total = m.remain = cost;
+    log(m.name+" 改機 "+cost+" 分（"+m.kit+"/"+m.prog+" → "+lot.pkg+"/"+lot.prog+"）for "+lot.id);
+  } else {
+    startPhase(m, "T1");
+  }
+  S.sel = null;
+  render();
+}
+function convert(m, pkg, prog){
+  if (m.state !== "IDLE" || m.lot) return;
+  const cost = setupCost(m, pkg, prog);
+  if (cost === 0){ log(m.name+" 已經是 "+pkg+"/"+prog+"，免改機"); render(); return; }
+  m.target = {pkg, prog}; m.state = "SETUP"; m.total = m.remain = cost;
+  log(m.name+" 預先改機 "+cost+" 分 → "+pkg+"/"+prog);
+  render();
+}
+
+/* ---------- 畫面 ---------- */
+function render(){
+  $("#clock").textContent = hhmm(Math.min(S.t, DAY));
+  $("#dayBar").style.width = (Math.min(S.t,DAY)/DAY*100)+"%";
+  $("#kGood").textContent = nf(S.good);
+  $("#kLots").textContent = S.lots_done;
+  $("#kUtil").textContent = utilization().toFixed(0)+"%";
+  $("#kScore").textContent = nf(score());
+  const wip = S.lots.filter(l => l.state === "WIP");
+  $("#kWip").textContent = wip.length;
+  $("#wipCnt").textContent = wip.length + " 批";
+
+  $("#wipList").innerHTML = wip.map(l => `
+    <div class="lot ${S.sel===l.id?"sel":""}" data-lot="${l.id}" style="border-left-color:var(--pkg${l.pkg})">
+      <div class="r1"><b>${l.id}</b>
+        <span><span class="tag pkg${l.pkg}">${l.pkg}</span> <span class="prog">${l.prog}</span></span>
+      </div>
+      <div class="r2">${nf(l.qty)} 顆 · ${l.tpu}s/顆 · T1 約 ${phaseMinutes(l,l.qty)} 分 · ${hhmm(l.arrive)} 到貨</div>
+    </div>`).join("") || `<div style="color:var(--dim);font-size:12px;padding:8px">目前沒有待派工貨批</div>`;
+
+  const sel = S.sel ? S.lots.find(l => l.id === S.sel) : null;
+  $("#lines").innerHTML = S.machines.map(m => {
+    const canTake = m.state === "IDLE" && !m.lot && sel;
+    let hint = "";
+    if (canTake){
+      const c = setupCost(m, sel.pkg, sel.prog);
+      hint = c === 0 ? `<span class="hint free">直接開測</span>`
+           : c === P.setupProg ? `<span class="hint">換程式 ${c} 分</span>`
+           : `<span class="hint pkg">換 Kit ${c} 分</span>`;
+    }
+    const pct = m.total ? (1 - m.remain/m.total)*100 : 0;
+    const barCls = m.state === "DOWN" ? "DOWN" : m.state === "SETUP" ? "SETUP"
+                 : (m.phase && m.phase !== "T1") ? "RT" : "";
+    let job = `<span style="color:var(--dim)">待命中 — 可派工或預先改機</span>`;
+    if (m.state === "DOWN")
+      job = `<b style="color:var(--down)">當機維修中</b><br>剩 ${m.downRemain} 分`
+          + (m.lot ? `<br><span style="color:var(--dim)">${m.lot.id} 暫停</span>` : "");
+    else if (m.state === "SETUP")
+      job = `<b style="color:var(--setup)">改機中</b> → ${m.target.pkg}/${m.target.prog}`
+          + (m.lot ? `<br><span style="color:var(--dim)">準備 ${m.lot.id}</span>` : "")
+          + `<br>剩 ${m.remain} 分`;
+    else if (m.state === "RUN")
+      job = `<b>${m.lot.id}</b> · ${nf(m.phase==="T1"?m.lot.qty:m.lot.pending)} 顆 · <b style="color:${m.phase==="T1"?"var(--run)":"var(--rt)"}">${m.phase}</b>`
+          + (m.lot.cum ? ` · 累積 ${m.lot.cum.toFixed(1)}%` : "")
+          + `<br>剩 ${m.remain} / ${m.total} 分`;
+    const opts = (arr,cur) => arr.map(v=>`<option ${v===cur?"selected":""}>${v}</option>`).join("");
+    return `
+    <div class="mc ${canTake?"target":""}" data-m="${m.id}">
+      ${hint}
+      <div class="mh"><b>${m.name}</b><span class="st ${m.state}">${m.state}</span></div>
+      <div class="cfg">Kit <span class="tag pkg${m.kit}">${m.kit}</span> 程式 <span class="prog">${m.prog}</span></div>
+      <div class="job">${job}<div class="bar ${barCls}"><div style="width:${pct}%"></div></div></div>
+      <div class="mstat"><span>良品 ${nf(m.good)}</span><span>完成 ${m.lots} 批</span>
+        <span>稼動 ${(m.run/Math.max(1,S.t)*100).toFixed(0)}%</span>
+        <span>改機 ${m.setup} 分</span><span>當機 ${m.down} 分</span></div>
+      <div class="tools">
+        <select data-cvp="${m.id}" ${m.state!=="IDLE"||m.lot?"disabled":""}>${opts(PKGS,m.kit)}</select>
+        <select data-cvg="${m.id}" ${m.state!=="IDLE"||m.lot?"disabled":""}>${opts(PROGS,m.prog)}</select>
+        <button data-cv="${m.id}" ${m.state!=="IDLE"||m.lot?"disabled":""}>改機</button>
+      </div>
+    </div>`;
+  }).join("");
+
+  $("#log").innerHTML = S.log.map(l => `<div>${l}</div>`).join("");
+}
+
+/* ---------- 迴圈 ---------- */
+function tick(){
+  if (!S.running || S.ended) return;
+  acc += (DAY / (P.realSeconds * 10)) * S.speed;
+  let guard = 0;
+  while (acc >= 1 && guard++ < 400){
+    acc -= 1;
+    stepMinute();
+    if (S.t >= DAY){ endGame(); break; }
+  }
+  render();
+}
+function endGame(){
+  S.ended = true; S.running = false;
+  clearInterval(timer); timer = null;
+  $("#btnPlay").textContent = "▶ 開始";
+  $("#btnPlay").classList.add("go");
+  const u = utilization();
+  $("#ovScore").textContent = nf(score());
+  $("#ovSum").innerHTML =
+    `良品產出 <b>${nf(S.good)}</b> 顆 ／ 完成 <b>${S.lots_done}</b> 批 ／ 平均稼動率 <b>${u.toFixed(1)}%</b>`
+    + `<div style="color:var(--dim);font-size:12px;margin-top:4px">分數 = 良品 × (1 + 稼動率 ${u.toFixed(1)}% × 加權 ${P.utilWeight})`
+    + `　未完成在製：${S.lots.filter(l=>l.state!=="WIP"&&l.state!=="DONE").length} 批（不計分）</div>`;
+  $("#ovTable").innerHTML =
+    `<table><tr><th>機台</th><th>良品</th><th>完成批</th><th>測試</th><th>改機</th><th>當機</th><th>閒置</th><th>稼動率</th></tr>`
+    + S.machines.map(m => `<tr><td>${m.name}</td><td>${nf(m.good)}</td><td>${m.lots}</td>
+        <td>${m.run}</td><td>${m.setup}</td><td>${m.down}</td><td>${m.idle}</td>
+        <td>${(m.run/DAY*100).toFixed(0)}%</td></tr>`).join("")
+    + `</table>`;
+  $("#ov").classList.add("show");
+}
+function play(){
+  if (S.ended) return;
+  S.running = !S.running;
+  $("#btnPlay").textContent = S.running ? "⏸ 暫停" : "▶ 繼續";
+  $("#btnPlay").classList.toggle("go", !S.running);
+  if (S.running && !timer) timer = setInterval(tick, 100);
+  if (!S.running && timer){ clearInterval(timer); timer = null; }
+}
+function reset(){
+  if (timer){ clearInterval(timer); timer = null; }
+  $("#ov").classList.remove("show");
+  $("#btnPlay").textContent = "▶ 開始";
+  $("#btnPlay").classList.add("go");
+  init();
+}
+
+/* ---------- 參數面板 ---------- */
+function buildParams(){
+  $("#params").innerHTML = Object.keys(DEF).map(k =>
+    `<label>${LABEL[k][0]}<span><input data-p="${k}" type="number" step="${k==="utilWeight"||k.startsWith("tpu")?"0.1":"1"}" value="${P[k]}"><small style="color:var(--dim)"> ${LABEL[k][1]}</small></span></label>`
+  ).join("");
+  $("#params").addEventListener("change", e => {
+    const k = e.target.dataset.p; if (!k) return;
+    const v = parseFloat(e.target.value);
+    if (!isNaN(v)) P[k] = v;
+    syncRules(); render();
+  });
+}
+function syncRules(){
+  $("#rSetupProg").textContent = P.setupProg;
+  $("#rSetupPkg").textContent = P.setupPkg;
+  $("#rYield").textContent = P.yieldMin+"~"+P.yieldMax+"%";
+  $("#rG1").textContent = P.gate1+"%";
+  $("#rG2").textContent = P.gate2+"%";
+}
+
+/* ---------- 事件 ---------- */
+document.addEventListener("click", e => {
+  const lotEl = e.target.closest("[data-lot]");
+  if (lotEl){ S.sel = (S.sel === lotEl.dataset.lot) ? null : lotEl.dataset.lot; render(); return; }
+  const cv = e.target.closest("[data-cv]");
+  if (cv){
+    const m = S.machines[+cv.dataset.cv];
+    convert(m, $(`[data-cvp="${m.id}"]`).value, $(`[data-cvg="${m.id}"]`).value);
+    return;
+  }
+  const mc = e.target.closest(".mc.target");
+  if (mc && S.sel){
+    const m = S.machines[+mc.dataset.m];
+    const lot = S.lots.find(l => l.id === S.sel);
+    if (lot && lot.state === "WIP") assign(m, lot);
+  }
+});
+$("#btnPlay").onclick = play;
+$("#btnReset").onclick = reset;
+$("#ovAgain").onclick = reset;
+$("#ovClose").onclick = () => $("#ov").classList.remove("show");
+document.querySelectorAll(".spd").forEach(b => b.onclick = () => {
+  document.querySelectorAll(".spd").forEach(x => x.classList.remove("on"));
+  b.classList.add("on"); S.speed = +b.dataset.spd;
+});
+document.addEventListener("keydown", e => {
+  if (e.code === "Space"){ e.preventDefault(); play(); }
+});
+
+buildParams(); syncRules(); init();
+</script>
+</body>
+</html>
