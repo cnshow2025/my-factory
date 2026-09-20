@@ -1474,14 +1474,15 @@ const PRESETS = [
     desc:"現場條件：5 台測試機、封裝 5 種、測試程式 8 種、單顆 2 秒、" +
          "批量結構 小批 0.5~2k 六成／中批 2~10k 三成／大批 10~25k 一成、" +
          "換 Kit 60 分、換程式 30 分、良率 80~99%、RT 門檻 99/98、一天 24 小時三班。" +
-         "當機率 5%/小時、Retest 救回率 60%、HOT 比例 10%、逾期一批扣 20,000 分、產品集中度 50%。" +
+         "當機率 11.5%/小時（校準到維修工時約為改機的 1.5 倍）、修復 10~120 分、" +
+         "Retest 救回率 60%、HOT 比例 10%、逾期一批扣 20,000 分、產品集中度 50%。" +
          "實際產線是 25 台機，畫面上維持 5 台方便手動玩；人機比跑分請用 25 台。",
     P:Object.assign({}, DEF, {
       machines:5, engineers:3, setupPkg:60, setupProg:30,
       pkgTypes:5, progTypes:8,
       yieldMin:80, yieldMax:99, gate1:99, gate2:98,
       recoverMin:40, recoverMax:80,
-      downPerHour:5, downMin:10, downMax:120,
+      downPerHour:11.5, downMin:10, downMax:120,
       recoverMin:60, recoverMax:60,
       repeatRate:50, mixSmall:60, mixMid:30,
       qtySmallMin:500, qtySmallMax:2000,
