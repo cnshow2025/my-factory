@@ -159,3 +159,89 @@ def build(path, lots, machines, note=None, example=False):
     ws.freeze_panes = "A2"; ws.row_dimensions[1].height = 22
 
     wb.save(path)
+
+
+def add_matrix(path, lots, machines, pkgs):
+    """加一頁「能力矩陣」：機台 × 封裝的對照表，外加產能 vs 貨量的檢查。
+
+    這頁是對照用的，模擬器讀的仍然是「機台」分頁的 can_packages。
+    """
+    from openpyxl import load_workbook
+    from openpyxl.utils import get_column_letter as CL
+
+    wb = load_workbook(path)
+    ws = wb.create_sheet("能力矩陣")
+    ws.sheet_view.showGridLines = False
+    n = len(machines)
+    first, last = 3, 2 + len(pkgs)          # 封裝欄的起訖（C 開始）
+    r0, r1 = 2, 1 + n                       # 機台資料列的起訖
+
+    head = ["機台", "sites"] + pkgs + ["目前裝著的 Kit", "目前程式", "幾小時後可用"]
+    _hdr(ws, 1, head)
+    for i, m in enumerate(machines):
+        r = 2 + i
+        can = m["can"] if m["can"] else pkgs        # 空白＝全部都能測
+        row = [m["id"], m["sites"]] + ["✔" if p in can else "" for p in pkgs] \
+              + [m["kit"], m["prog"], m["avail"]]
+        _put(ws, r, row)
+        for c in range(first, last + 1):
+            cell = ws.cell(row=r, column=c)
+            cell.alignment = Alignment(horizontal="center")
+            if cell.value == "✔":
+                cell.font = Font(name=F, size=11, bold=True, color=TEAL)
+        # 目前正裝著的那一格反白，一眼看出機隊現在停在什麼配置
+        if m["kit"] in pkgs:
+            k = ws.cell(row=r, column=first + pkgs.index(m["kit"]))
+            k.fill = PatternFill("solid", fgColor="FFF1CC")
+
+    stats = [
+        ("能測這種封裝的機台數",   '=COUNTIF({c}%d:{c}%d,"✔")' % (r0, r1)),
+        ("能測這種封裝的 site 合計", '=SUMIF({c}%d:{c}%d,"✔",$B$%d:$B$%d)' % (r0, r1, r0, r1)),
+        ("目前正裝著這種 Kit 的 site", '=SUMIF($%s$%d:$%s$%d,{c}$1,$B$%d:$B$%d)'
+            % (CL(last+1), r0, CL(last+1), r1, r0, r1)),
+        ("這批貨的工時（分，1 site）",
+            '=SUMPRODUCT((貨批!$B$2:$B$%d={c}$1)*貨批!$D$2:$D$%d*貨批!$E$2:$E$%d)/60'
+            % (len(lots)+1, len(lots)+1, len(lots)+1)),
+    ]
+    base = r1 + 2
+    for j, (label, tpl) in enumerate(stats):
+        r = base + j
+        ws.cell(row=r, column=1, value=label).font = Font(name=F, bold=True, size=10, color=INK)
+        for c in range(first, last + 1):
+            cell = ws.cell(row=r, column=c, value=tpl.replace("{c}", CL(c)))
+            cell.font = Font(name=F, size=10, color=INK)
+            cell.number_format = "#,##0"
+            cell.alignment = Alignment(horizontal="center")
+            cell.border = BOX
+            cell.fill = PatternFill("solid", fgColor=ICE)
+    # 重點列：工時 ÷ 目前裝著的 site ＝ 完全不換 Kit 的話這種封裝要跑多久
+    r = base + len(stats)
+    ws.cell(row=r, column=1, value="若完全不換 Kit，要跑幾小時").font = Font(name=F, bold=True, size=10, color=RED)
+    for c in range(first, last + 1):
+        cell = ws.cell(row=r, column=c,
+                       value='=IFERROR({c}%d/{c}%d/60,"—")'.replace("{c}", CL(c)) % (base+3, base+2))
+        cell.font = Font(name=F, size=10, bold=True, color=INK)
+        cell.number_format = "0.0"
+        cell.alignment = Alignment(horizontal="center")
+        cell.border = BOX
+        cell.fill = PatternFill("solid", fgColor="FFE8D9")
+
+    notes = [
+        "✔ ＝ 這台機可以測這種封裝（對應「機台」分頁的 can_packages；空白代表該台什麼都能測，這裡會全部打勾）。",
+        "黃底 ＝ 這台機「現在」裝著的 Kit，也就是機隊此刻停在什麼配置。",
+        "最後一列是重點：把機隊凍結在現在的配置（完全不換 Kit），每種封裝各要跑多久。",
+        "哪一種明顯偏高，就是這批貨的瓶頸——代表它的量和現在裝著它的 site 數對不上，得先換 Kit 把配置拉回來。",
+        "這頁是對照用的，模擬器讀的仍然是「機台」分頁；改這裡不會改變模擬結果。",
+    ]
+    for j, t in enumerate(notes):
+        ws.cell(row=r + 2 + j, column=1, value=t).font = Font(name=F, size=10, color=GREY)
+
+    ws.column_dimensions["A"].width = 26
+    ws.column_dimensions["B"].width = 7
+    for c in range(first, last + 1):
+        ws.column_dimensions[CL(c)].width = max(10, len(pkgs[c - first]) + 3)
+    for c in (last + 1, last + 2, last + 3):
+        ws.column_dimensions[CL(c)].width = 16
+    ws.freeze_panes = "C2"
+    ws.row_dimensions[1].height = 22
+    wb.save(path)

@@ -77,8 +77,14 @@ for i in range(25):
     avail = 0 if random.random() < 0.88 else round(random.uniform(1, 6), 1)
     machines.append([mid, sites, kit, prog, can, avail])
 
-C.build("../模擬WIP_200批.xlsx", lots, machines,
+OUT = "../模擬WIP_200批.xlsx"
+C.build(OUT, lots, machines,
         note="這是模擬產生的 200 批測試資料，結構與填寫範本相同，可直接載入模擬器。")
+# 機台 × 封裝的對照表（對照用，模擬器讀的仍是「機台」分頁）
+C.add_matrix(OUT, [dict(zip(["id","pkg","prog","qty","tpu","arrive","due","hot","yield","note"], l))
+                   for l in lots],
+             [dict(zip(["id","sites","kit","prog","can","avail"], m)) for m in machines],
+             PKG_NAMES)
 print("lots=%d machines=%d" % (len(lots), len(machines)))
 tot = sum(l[3]*l[4] for l in lots)
 print("總顆數 %d，純測試工時(1 site) %.1f h，機隊 %d site，理論最短 %.2f h"
