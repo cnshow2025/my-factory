@@ -330,7 +330,7 @@
 
           <div class="arow" style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
             <span style="color:var(--dim)">人機比跑分</span>
-            <label>機台數 <input type="text" id="ratioM" value="5,10,25,50"></label>
+            <label>機台數 <input type="text" id="ratioM" value="5,25,50"></label>
             <label>人機比 1: <input type="text" id="ratioR" value="1,2,3,5,10,25"></label>
             <label>天數 <input type="number" id="ratioDays" value="10" min="1" max="60"></label>
             <button id="runRatio" class="go">▶ 跑人機比比較</button>
@@ -408,7 +408,7 @@ const DEF = {
   yieldMin:80, yieldMax:99, gate1:99, gate2:98,
   recoverMin:40, recoverMax:80,
   initialLots:6, arrivalEvery:70, arrivalBatch:2,
-  mixSmall:60, mixMid:30,
+  repeatRate:0, mixSmall:60, mixMid:30,
   qtySmallMin:500, qtySmallMax:2000,
   qtyMidMin:2000, qtyMidMax:10000,
   qtyBigMin:10000, qtyBigMax:25000,
@@ -427,6 +427,7 @@ const LABEL = {
   gate1:["T1 免 retest 門檻","%"], gate2:["RT1 免 RT2 門檻","%"],
   recoverMin:["Retest 救回率下限","%"], recoverMax:["Retest 救回率上限","%"],
   initialLots:["開局貨批數","批"], arrivalEvery:["到貨間隔","分"], arrivalBatch:["每次到貨","批"],
+  repeatRate:["產品集中度","%"],
   mixSmall:["小批量占比","%"], mixMid:["中批量占比","%"],
   qtySmallMin:["小批量下限","顆"], qtySmallMax:["小批量上限","顆"],
   qtyMidMin:["中批量下限","顆"], qtyMidMax:["中批量上限","顆"],
@@ -511,6 +512,11 @@ function newLot(arrive){
   const tpu = +rf(P.tpuMin,P.tpuMax).toFixed(2);
   const ok = runnablePkgs();
   const hot = rng() < P.hotRate/100;
+  // 產品集中度：主力機種會連續進來，不是每批都換封裝/程式。
+  // 這個比例直接決定現場的改機頻率，和到貨量分開控制。
+  const repeat = S.lots.length && rng()*100 < P.repeatRate
+    ? S.lots[S.lots.length - 1 - Math.floor(rng() * Math.min(8, S.lots.length))]
+    : null;
   // 預估工時：T1 加 30% retest 餘裕，再加一次換 Kit
   // （小批的測試時間可能比一次換 Kit 還短，不算進去的話小批天生就會遲交）
   const est = qty * tpu / 60 * 1.3 + P.setupPkg;
@@ -534,7 +540,8 @@ function newLot(arrive){
   due = Math.round(due);
   return {
     id:"L"+String(S.seq++).padStart(3,"0"),
-    pkg:ok[ri(0,ok.length-1)], prog:PROGS[ri(0,PROGS.length-1)],
+    pkg: repeat ? repeat.pkg : ok[ri(0,ok.length-1)],
+    prog: repeat ? repeat.prog : PROGS[ri(0,PROGS.length-1)],
     qty, size, tpu, baseYield:+rf(P.yieldMin,P.yieldMax).toFixed(1),
     arrive, hot, due, state:"WIP", good:0, pending:0, cum:0, rt:0,
     machine:null, late:false, doneAt:null
@@ -1467,7 +1474,8 @@ const PRESETS = [
     desc:"現場條件：5 台測試機、封裝 5 種、測試程式 8 種、單顆 2 秒、" +
          "批量結構 小批 0.5~2k 六成／中批 2~10k 三成／大批 10~25k 一成、" +
          "換 Kit 60 分、換程式 30 分、良率 80~99%、RT 門檻 99/98、一天 24 小時三班。" +
-         "當機率 5%/小時、Retest 救回率 60%、HOT 比例 10%、逾期一批扣 20,000 分。",
+         "當機率 5%/小時、Retest 救回率 60%、HOT 比例 10%、逾期一批扣 20,000 分、產品集中度 50%。" +
+         "實際產線是 25 台機，畫面上維持 5 台方便手動玩；人機比跑分請用 25 台。",
     P:Object.assign({}, DEF, {
       machines:5, engineers:3, setupPkg:60, setupProg:30,
       pkgTypes:5, progTypes:8,
@@ -1475,7 +1483,7 @@ const PRESETS = [
       recoverMin:40, recoverMax:80,
       downPerHour:5, downMin:10, downMax:120,
       recoverMin:60, recoverMax:60,
-      mixSmall:60, mixMid:30,
+      repeatRate:50, mixSmall:60, mixMid:30,
       qtySmallMin:500, qtySmallMax:2000,
       qtyMidMin:2000, qtyMidMax:10000,
       qtyBigMin:10000, qtyBigMax:25000,
