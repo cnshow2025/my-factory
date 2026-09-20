@@ -13,7 +13,7 @@ const TEAL="#1C7293", NAVY="#1E2761", GOOD="#0F7B6C", WARN="#C2410C", BAD="#9B1C
       AMBER="#E0A458", INK="#16213E", MUTED="#5A6785", GRID="#E3E8F0";
 const fmt = (v,d) => (d!=null? v.toFixed(d) : (Math.abs(v)>=1000? v.toLocaleString() : (Math.round(v*10)/10).toString()));
 
-function hbar(el,{title,labels,values,color=TEAL,unit="",max=null,pl=210,dec=null,colors=null}){
+function hbar(el,{title,labels,values,color=TEAL,unit="",max=null,pl=210,dec=null,colors=null,ref=null,refLabel=""}){
   const PL=pl;
   const W=el.dataset.w*1, H=el.dataset.h*1, PR=78, PT=8, PB=22;
   const m = max ?? Math.max(...values)*1.12, mn = Math.min(0,...values)*1.1;
@@ -26,7 +26,13 @@ function hbar(el,{title,labels,values,color=TEAL,unit="",max=null,pl=210,dec=nul
     s+=`<text x="${PL-12}" y="${y+bw/2+5}" text-anchor="end" font-size="13" fill="${INK}">${labels[i]}</text>`;
     s+=`<text x="${(v<0?zero+10:x0+w+8)}" y="${y+bw/2+5}" text-anchor="start" font-size="13" font-weight="700" fill="${v<0?WARN:INK}">${fmt(v,dec)}${unit}</text>`;
   }
-  s+=`<line x1="${zero}" y1="${PT}" x2="${zero}" y2="${H-PB}" stroke="${GRID}" stroke-width="1.5"/></svg>`;
+  s+=`<line x1="${zero}" y1="${PT}" x2="${zero}" y2="${H-PB}" stroke="${GRID}" stroke-width="1.5"/>`;
+  if(ref!=null){
+    const rx=x(ref);
+    s+=`<line x1="${rx}" y1="${PT-2}" x2="${rx}" y2="${H-PB}" stroke="${INK}" stroke-width="2" stroke-dasharray="7 5"/>`
+      +`<text x="${rx+8}" y="${PT+12}" font-size="13" font-weight="700" fill="${INK}">${refLabel}</text>`;
+  }
+  s+=`</svg>`;
   el.innerHTML=(title?`<div class="ct">${title}</div>`:"")+s;
 }
 function vbar(el,{title,labels,values,color=TEAL,unit="",series2=null,names=null,min=0,max=null,dec=null,color2=AMBER}){
@@ -172,4 +178,13 @@ vbar(mk("c_rematch",620,400),{title:"專用機配置對齊貨量：買到的是�
  labels:["現況配置","專用機依貨量重新對齊"],
  values:[6.4,6.6], series2:[19.8,12.5],
  names:["最佳法則","最差法則"], color:GOOD, color2:BAD, min:0, max:23, dec:1});
+
+/* ===== 切換法則的判斷訊號 ===== */
+hbar(mk("c_switch",1140,470),{title:"切換訊號：改機＋等工程師吃掉多少機台時間（以「追交期」排程量測）",
+ labels:["25 台・200 批・3 人","5 台・90 批・3 人","5 台・90 批・5 人","5 台・90 批・10 人",
+         "25 台・200 批・5 人","25 台・90 批・3 人","25 台・200 批・10 人",
+         "25 台・90 批・5 人","25 台・90 批・10 人","25 台・90 批・配置對齊・10 人"],
+ values:[46.6,36.9,35.8,35.8,31.7,30.9,23.8,15.4,10.4,7.7],
+ unit:"%", pl:250, dec:1, max:52, ref:33.7, refLabel:"≈ 33%",
+ colors:[WARN,WARN,WARN,WARN,GOOD,GOOD,GOOD,GOOD,GOOD,GOOD]});
 </script>
