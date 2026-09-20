@@ -14,7 +14,8 @@ const T = (s, txt, o) => s.addText(txt, Object.assign({ isTextBox:true, fontFace
 
 // 圖表以高解析度 PNG 內嵌，任何看圖工具都能完整顯示線條
 const AR = { c_factors:2.5522, c_cum:2.5522, c_depth:1.3965, c_late:1.3965, c_eng:1.3965,
-             c_time:1.3965, c_ded:1.3146, c_ratio:1.5023, c_lever:1.5960, c_policy:1.5677 };
+             c_time:1.3965, c_ded:1.3146, c_ratio:1.5023, c_lever:1.5960, c_policy:1.5677,
+             c_clear:2.7431, c_curve:1.5023, c_engpol:1.5023, c_frozen:1.3965 };
 function img(s, id, x, y, w){
   const h = w / AR[id];
   s.addImage({ path:`charts/${id}.png`, x, y, w, h });
@@ -196,9 +197,48 @@ card(s, 0.62, 6.03, 12.05, 1.28, "效益集中在前兩步", [
 ], GOOD);
 s.addNotes("A→E 累積 +71.4 萬顆／日（+92.8%）。B +40.8 萬、C +20.8 萬、D +6.9 萬、E +3.0 萬。");
 
-/* ===== 10 專業建議 ===== */
+
+/* ===== 10 實測案例：清空一批真實 WIP ===== */
+s = pres.addSlide();
+head(s, "09", "實測案例：清空 200 批 WIP 要多久", "把待測清單直接餵進模型，跑到最後一批做完為止——問的不再是「一天做多少」，而是「這堆貨要多久清光」");
+img(s, "c_clear", 0.62, 1.50, 7.5);        // 底緣 ≈ 4.23
+img(s, "c_curve", 8.27, 1.50, 4.44);       // 底緣 ≈ 4.46
+card(s, 0.62, 4.60, 6.0, 2.00, "這批貨的基本盤", [
+  "200 批・66.2 萬顆・25 台機（機隊 100 site）",
+  "理論最短 4 小時 01 分（零改機零當機）",
+  "最快的法則 9 小時 41 分，仍比下限多 142%",
+  "最快與最慢差 10 小時 20 分"
+], PRIMARY);
+card(s, 6.75, 4.60, 5.92, 2.00, "完成曲線看得出尾巴", [
+  "省改機前 3 小時就做完 137 批，遙遙領先",
+  "但 9 小時後停在 198 批，最後 2 批拖到 14.5 小時",
+  "大批給快機起步慢，10 小時整批清光",
+  "看整批何時清空，不能只看前段衝得多快"
+], WARN);
+T(s, "註　情境為「純排程比較」：關閉當機與良率波動，同一批貨每次跑結果完全相同，法則之間的差異純粹來自排程順序。",
+  { x:0.62, y:6.70, w:12.05, h:0.36, fontSize:11, color:MUTED });
+s.addNotes("這是模擬產生的 200 批 WIP，結構比照現場：5 種封裝、8 種程式、小中大批 60/30/10。");
+
+/* ===== 11 人力改變最佳法則 ===== */
+s = pres.addSlide();
+head(s, "10", "人力改變了最佳排程法則", "同一批貨、同一組機台，只改工程師人數，冠軍法則就換人做——這是前面所有結論的邊界條件");
+img(s, "c_engpol", 0.62, 1.46, 5.9);       // 底緣 ≈ 5.39
+img(s, "c_frozen", 7.21, 1.46, 5.5);       // 底緣 ≈ 5.40
+card(s, 0.62, 5.52, 6.0, 1.75, "交叉點在 5～10 人之間", [
+  "3 人：省改機 13.5 h 勝出，大批給快機要 18.0 h",
+  "10 人：大批給快機 9.7 h，省改機落到 14.5 h",
+  "人少 → 改機排隊；人多 → 閒機排隊"
+], GOOD);
+card(s, 6.75, 5.52, 5.92, 1.75, "為什麼省改機在人多時會輸", [
+  "不換 Kit ＝ 把機台配置凍結在現況",
+  "QFN32 佔 38.6% 工時，卻只有 22/100 site 裝著它",
+  "光這一種封裝就要 7 小時，其他機台只能閒著"
+], WARN);
+s.addNotes("3 人時省改機的等工程師時間是 32 分，其他法則是 5,000~13,000 分；加上當機後，3 人除了省改機全部拖到 36~52 小時。");
+
+/* ===== 12 專業建議 ===== */
 s = pres.addSlide(); s.background = { color:NAVY };
-T(s, "09", { x:0.62, y:0.42, w:0.55, h:0.5, fontSize:13, bold:true, color:TEAL });
+T(s, "11", { x:0.62, y:0.42, w:0.55, h:0.5, fontSize:13, bold:true, color:TEAL });
 T(s, "專業建議", { x:1.25, y:0.34, w:11.4, h:0.62, fontSize:30, bold:true, color:WHITE, fontFace:HEAD });
 T(s, "依「投入成本 → 效益」排序，前兩項不需任何資本支出", { x:1.25, y:0.98, w:11.4, h:0.4, fontSize:13.5, color:ICE });
 const recs = [
@@ -220,12 +260,14 @@ recs.forEach((r, i) => {
     align:"right", fontFace:HEAD, margin:0 });
 });
 T(s, "四項全做：每日良品 77 萬 → 148 萬顆（+93%），逾期批數 220 批 → 2 批以下",
-  { x:0.62, y:6.68, w:12.05, h:0.42, fontSize:13, color:ICE, align:"center" });
+  { x:0.62, y:6.60, w:12.05, h:0.34, fontSize:13, color:ICE, align:"center" });
+T(s, "但第 1 項有前提：省改機是「人力吃緊」時的最佳解。人補到 1:2.5 之後，改用「大批給快機」更快——夜班與白班人數不同，規則就該不同。",
+  { x:0.62, y:6.94, w:12.05, h:0.34, fontSize:11.5, color:"A9BBDD", align:"center" });
 s.addNotes("前兩項是純管理決策，今天就能改；第三項是人力預算；第四項需要 IT 或設備工程投入。");
 
-/* ===== 11 實施路徑・追蹤指標・模型限制 ===== */
+/* ===== 13 實施路徑・追蹤指標・模型限制 ===== */
 s = pres.addSlide();
-head(s, "10", "實施路徑、追蹤指標與模型限制", "建議以四週為一個驗證循環，每一步都有可量測的指標");
+head(s, "12", "實施路徑、追蹤指標與模型限制", "建議以四週為一個驗證循環，每一步都有可量測的指標");
 const steps = [
   ["第 1–2 週", "凍結預先派工", "改為機台做完才派下一批", "逾期批數／日"],
   ["第 3–4 週", "導入省改機排序", "同 Kit 同程式的批優先串接", "每台每日改機分鐘"],
@@ -234,7 +276,7 @@ const steps = [
 ];
 steps.forEach((st, i) => {
   const x = 0.62 + i*3.12;
-  s.addShape(pres.ShapeType.roundRect, { x, y:1.55, w:2.92, h:2.80, fill:{ color:"F5F7FB" },
+  s.addShape(pres.ShapeType.roundRect, { x, y:1.55, w:2.92, h:2.62, fill:{ color:"F5F7FB" },
     line:{ color:"FFFFFF", width:0 }, rectRadius:0.05 });
   s.addShape(pres.ShapeType.ellipse, { x:x+0.25, y:1.76, w:0.46, h:0.46,
     fill:{ color:PRIMARY }, line:{ color:PRIMARY, width:0 } });
@@ -242,21 +284,22 @@ steps.forEach((st, i) => {
   T(s, st[0], { x:x+0.25, y:2.34, w:2.45, h:0.28, fontSize:11.5, color:TEAL, bold:true, margin:0 });
   T(s, st[1], { x:x+0.25, y:2.64, w:2.45, h:0.38, fontSize:15, bold:true, color:PRIMARY, margin:0 });
   T(s, st[2], { x:x+0.25, y:3.06, w:2.45, h:0.46, fontSize:12, color:INK, lineSpacing:17, margin:0 });
-  T(s, "追蹤：" + st[3], { x:x+0.25, y:3.56, w:2.45, h:0.62, fontSize:11, color:MUTED, lineSpacing:15, margin:0 });
+  T(s, "追蹤：" + st[3], { x:x+0.25, y:3.50, w:2.45, h:0.58, fontSize:11, color:MUTED, lineSpacing:15, margin:0 });
 });
-card(s, 0.62, 4.52, 6.0, 2.10, "模型尚未納入（避免過度外推）", [
+card(s, 0.62, 4.34, 6.0, 2.36, "模型尚未納入（避免過度外推）", [
   "人員技能差異與交接班",
   "Handler／Kit 數量限制（假設隨時可取得）",
   "物料搬運與 WIP 暫存空間限制",
   "同一機台多產品混測（假設一次一批）"
 ], WARN);
-card(s, 6.75, 4.52, 5.92, 2.10, "建議補充的現場數據", [
+card(s, 6.75, 4.34, 5.92, 2.36, "建議補充的現場數據", [
+  "實際的 WIP 清單（第 9~10 頁用模擬資料）",
   "每台機實際日完成批數（核對稼動率 46.7%）",
   "逾期一批的真實違約成本（現以 20,000 代入）",
   "換程式是否一律由工程師執行——若由操作員執行，人力需求可由 10 人降至 5～6 人"
 ], PRIMARY);
 T(s, "一句話總結　產出的瓶頸不是機台，是改機與工程師；而排程方式決定了這兩者被浪費多少。　驗證用模擬器：cnshow2025.github.io/my-factory（參數組選「我的工廠」）",
-  { x:0.62, y:6.76, w:12.05, h:0.42, fontSize:11.5, color:MUTED });
+  { x:0.62, y:6.80, w:12.05, h:0.40, fontSize:11.5, color:MUTED });
 s.addNotes("四個階段刻意分開，避免同時變動多個變數而無法歸因。最大的單一不確定性是換程式是否佔用工程師。");
 
 pres.writeFile({ fileName: "../測試排程分析報告.pptx" }).then(f => console.log("written:", f));

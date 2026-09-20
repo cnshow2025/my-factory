@@ -13,7 +13,7 @@ const TEAL="#1C7293", NAVY="#1E2761", GOOD="#0F7B6C", WARN="#C2410C", BAD="#9B1C
       AMBER="#E0A458", INK="#16213E", MUTED="#5A6785", GRID="#E3E8F0";
 const fmt = (v,d) => (d!=null? v.toFixed(d) : (Math.abs(v)>=1000? v.toLocaleString() : (Math.round(v*10)/10).toString()));
 
-function hbar(el,{title,labels,values,color=TEAL,unit="",max=null,pl=210,dec=null}){
+function hbar(el,{title,labels,values,color=TEAL,unit="",max=null,pl=210,dec=null,colors=null}){
   const PL=pl;
   const W=el.dataset.w*1, H=el.dataset.h*1, PR=78, PT=8, PB=22;
   const m = max ?? Math.max(...values)*1.12, mn = Math.min(0,...values)*1.1;
@@ -22,7 +22,7 @@ function hbar(el,{title,labels,values,color=TEAL,unit="",max=null,pl=210,dec=nul
   const zero=x(0);
   for(let i=0;i<labels.length;i++){
     const y=PT+i*bw, v=values[i], x0=Math.min(zero,x(v)), w=Math.abs(x(v)-zero);
-    s+=`<rect x="${x0}" y="${y+bw*0.16}" width="${w}" height="${bw*0.68}" rx="3" fill="${v<0?WARN:color}"/>`;
+    s+=`<rect x="${x0}" y="${y+bw*0.16}" width="${w}" height="${bw*0.68}" rx="3" fill="${v<0?WARN:(colors&&colors[i])||color}"/>`;
     s+=`<text x="${PL-12}" y="${y+bw/2+5}" text-anchor="end" font-size="13" fill="${INK}">${labels[i]}</text>`;
     s+=`<text x="${(v<0?zero+10:x0+w+8)}" y="${y+bw/2+5}" text-anchor="start" font-size="13" font-weight="700" fill="${v<0?WARN:INK}">${fmt(v,dec)}${unit}</text>`;
   }
@@ -138,4 +138,27 @@ line(mk("c_cum",1100,430),{title:"累積效益路徑：每日良品（萬顆）"
 donut(mk("c_time",560,400),{title:"現況：機台時間都花在哪裡",
  labels:["測試","改機","維修","等工程師","閒置"], values:[46.7,23.8,11.2,3.7,14.6],
  colors:[GOOD,WARN,BAD,AMBER,"#C7CEDB"]});
+
+/* ===== 實測案例：清空 200 批 WIP ===== */
+hbar(mk("c_clear",1100,400),{title:"清空 200 批 WIP 要多久（25 台機・10 位工程師・小時）",
+ labels:["最短工時 SPT","加權綜合","急件優先→交期","省改機優先","最早交期 EDD","到貨順序 FIFO","大批給快機"],
+ values:[20.0,17.6,15.6,14.5,11.2,10.4,9.7], unit:" h", pl:200, dec:1, max:22,
+ colors:[BAD,WARN,WARN,WARN,TEAL,TEAL,GOOD]});
+
+line(mk("c_curve",640,400),{title:"完成曲線：累積完成批數（10 位工程師）",
+ labels:["0h","","","3h","","","6h","","","9h","","","12h","","","15h"],
+ series:[{name:"省改機優先",values:[0,67,105,137,165,181,187,192,193,195,198,199,199,199,199,200]},
+         {name:"大批給快機",values:[0,21,48,79,114,139,156,173,188,195,200,200,200,200,200,200]},
+         {name:"到貨順序 FIFO",values:[0,15,39,67,87,112,137,159,176,192,199,200,200,200,200,200]}],
+ min:0, max:200, colors:[WARN,GOOD,TEAL], pr:30});
+
+vbar(mk("c_engpol",640,400),{title:"人力改變最佳法則：清空時間（小時，越低越好）",
+ labels:["3 人\n1:8.3","5 人\n1:5","10 人\n1:2.5"],
+ values:[13.5,14.5,14.5], series2:[18.0,12.6,9.7],
+ names:["省改機優先","大批給快機"], color:WARN, min:0, max:21, dec:1});
+
+hbar(mk("c_frozen",560,400),{title:"若完全不換 Kit，各封裝要跑多久（小時）",
+ labels:["QFN32","SOP16","QFN48","TSSOP28","BGA144"],
+ values:[7.0,4.5,3.5,2.5,0.4], unit:" h", pl:120, dec:1, max:8,
+ colors:[BAD,MUTED,MUTED,MUTED,MUTED]});
 </script>
