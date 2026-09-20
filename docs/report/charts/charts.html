@@ -29,7 +29,7 @@ function hbar(el,{title,labels,values,color=TEAL,unit="",max=null,pl=210,dec=nul
   s+=`<line x1="${zero}" y1="${PT}" x2="${zero}" y2="${H-PB}" stroke="${GRID}" stroke-width="1.5"/></svg>`;
   el.innerHTML=(title?`<div class="ct">${title}</div>`:"")+s;
 }
-function vbar(el,{title,labels,values,color=TEAL,unit="",series2=null,names=null,min=0,max=null,dec=null}){
+function vbar(el,{title,labels,values,color=TEAL,unit="",series2=null,names=null,min=0,max=null,dec=null,color2=AMBER}){
   const W=el.dataset.w*1, H=el.dataset.h*1, PL=64, PR=14, PT=22, PB=(series2?58:44);
   const all=series2?[...values,...series2]:values;
   const m=max ?? Math.max(...all)*1.18;
@@ -43,14 +43,14 @@ function vbar(el,{title,labels,values,color=TEAL,unit="",series2=null,names=null
     const bx=PL+i*gw, bw=gw*0.62/n, off=(gw-bw*n)/2;
     [values, series2].filter(Boolean).forEach((arr,k)=>{
       const v=arr[i], X=bx+off+k*bw;
-      s+=`<rect x="${X}" y="${y(v)}" width="${bw}" height="${H-PB-y(v)}" rx="3" fill="${k?AMBER:color}"/>`
+      s+=`<rect x="${X}" y="${y(v)}" width="${bw}" height="${H-PB-y(v)}" rx="3" fill="${k?color2:color}"/>`
         +`<text x="${X+bw/2}" y="${y(v)-7}" text-anchor="middle" font-size="12" font-weight="700" fill="${INK}">${fmt(v,dec)}</text>`;
     });
     lb.split("\n").forEach((t,j)=>{ s+=`<text x="${bx+gw/2}" y="${H-PB+17+j*14}" text-anchor="middle" font-size="12" fill="${INK}">${t}</text>`; });
   });
   s+=`</svg>`;
   let lg="";
-  if(series2&&names) lg=`<div class="lg"><span><i style="background:${color}"></i>${names[0]}</span><span><i style="background:${AMBER}"></i>${names[1]}</span></div>`;
+  if(series2&&names) lg=`<div class="lg"><span><i style="background:${color}"></i>${names[0]}</span><span><i style="background:${color2}"></i>${names[1]}</span></div>`;
   el.innerHTML=(title?`<div class="ct">${title}</div>`:"")+s+lg;
 }
 function line(el,{title,labels,series,unit="",min=null,max=null,colors=[TEAL,NAVY,AMBER],pr=22,dec=null}){
@@ -161,4 +161,15 @@ hbar(mk("c_frozen",560,400),{title:"若完全不換 Kit，各封裝要跑多久�
  labels:["QFN32","SOP16","QFN48","TSSOP28","BGA144"],
  values:[7.0,4.5,3.5,2.5,0.4], unit:" h", pl:120, dec:1, max:8,
  colors:[BAD,MUTED,MUTED,MUTED,MUTED]});
+
+/* ===== 機隊規模與專用機配置 ===== */
+vbar(mk("c_fleet",620,400),{title:"機隊規模會換掉冠軍法則：清空 90 批（小時）",
+ labels:["5 台機\n機隊 26 site","25 台機\n機隊 100 site"],
+ values:[14.6,7.9], series2:[29.4,6.4],
+ names:["省改機優先","大批給快機"], color:WARN, color2:GOOD, min:0, max:34, dec:1});
+
+vbar(mk("c_rematch",620,400),{title:"專用機配置對齊貨量：買到的是容錯（小時）",
+ labels:["現況配置","專用機依貨量重新對齊"],
+ values:[6.4,6.6], series2:[19.8,12.5],
+ names:["最佳法則","最差法則"], color:GOOD, color2:BAD, min:0, max:23, dec:1});
 </script>
