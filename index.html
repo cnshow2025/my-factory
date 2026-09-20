@@ -289,6 +289,33 @@
     <div id="lines"></div>
 
     <div class="panel hideMobile" style="margin-top:12px">
+      <details id="wipPanelDetails">
+        <summary>📥 實際貨批分析（載入現場 WIP，比較清空時間）</summary>
+        <div class="arow" style="margin-top:10px">
+          <button id="wipPick" class="go">選擇檔案（.xlsx）</button>
+          <input type="file" id="wipFile" accept=".xlsx" style="display:none">
+          <span id="wipName" style="color:var(--dim)">尚未載入</span>
+          <button id="wipClear" style="display:none">移除，回到遊戲模式</button>
+        </div>
+        <div class="adesc" id="wipHint">載入「貨批」「機台」兩個分頁的 xlsx，模擬就不再用亂數產生貨，改成跑你真實的 WIP，
+          一路跑到最後一批做完為止，比較各種排程法則要花多久。檔案格式見 docs/ 的填寫範本。</div>
+        <div id="wipSummary"></div>
+        <div class="arow" id="wipRun" style="display:none;margin-top:10px">
+          <label>模式 <select id="wipMode">
+            <option value="det">純排程比較（關當機與良率波動，可重現）</option>
+            <option value="rand">實際情境（含當機與良率波動）</option>
+          </select></label>
+          <label>工程師 <input type="number" id="wipEng" value="10" min="1" max="99" step="1"></label>
+          <label>重跑次數 <input type="number" id="wipReps" value="10" min="1" max="30" step="1"></label>
+          <button id="wipGo" class="go">▶ 跑全部排程法則</button>
+          <span id="wipStatus"></span>
+        </div>
+        <div id="wipTable"></div>
+        <div id="wipChart"></div>
+      </details>
+    </div>
+
+    <div class="panel hideMobile" style="margin-top:12px">
       <details open>
         <summary>🤖 排程演算法（自動派工與跑分比較）</summary>
         <div id="algo">
@@ -450,17 +477,21 @@ const DAY = 1440;
 const PKG_ALL = ["A","B","C","D","E","F"];
 const PROG_ALL = ["P1","P2","P3","P4","P5","P6","P7","P8"];
 let PKGS = PKG_ALL.slice(0,3), PROGS = PROG_ALL.slice(0,4);
-// 機台能力矩陣：P.cap[i] = 該機台可以測的封裝字串，例如 "ACE"
+// 機台能力矩陣：P.cap[i] = 該機台可以測的封裝陣列，例如 ["A","C","E"]。
+// 舊版（以及內建參數組）把它寫成 "ACE" 這種字串，這裡一併接受。
+// 載入實際貨批後封裝代號會變成 QFN48 這類多字元名稱，所以內部一律用陣列比對。
+function capArr(v){ return Array.isArray(v) ? v : String(v || "").split(""); }
 function normalizeCap(){
   if (!Array.isArray(P.cap)) P.cap = [];
   const n = Math.max(1, Math.round(P.machines));
   P.cap.length = n;
   for (let i = 0; i < n; i++){
-    let c = (P.cap[i] || "").split("").filter(x => PKGS.includes(x));
+    let c = capArr(P.cap[i]).filter(x => PKGS.includes(x));
     if (!c.length) c = PKGS.slice();          // 沒設＝全部都能測
-    P.cap[i] = c.join("");
+    P.cap[i] = c;
   }
 }
+function capOf(id){ return capArr(P.cap[id]); }
 // 機台速度 ＝ 等效 site 數（機台能力的綜合倍率）。
 // 測試時間內的產出 ＝ 速度 × 單 site 產出，所以速度 8 的機台跑同一批只要 1/8 的時間。
 function normalizeSpeed(){
@@ -477,11 +508,16 @@ function fleetSpeed(){
   const a = P.speed && P.speed.length ? P.speed : [1];
   return a.reduce((x,y) => x + y, 0) / a.length;
 }
-function canRun(m, pkg){ return (P.cap[m.id] || "").includes(pkg); }
+function canRun(m, pkg){ return capOf(m.id).includes(pkg); }
 function machinesFor(pkg){ return S.machines.filter(m => canRun(m, pkg)); }
-function runnablePkgs(){ return PKGS.filter(pk => P.cap.some(c => c.includes(pk))); }
+function runnablePkgs(){ return PKGS.filter(pk => P.cap.some(c => capArr(c).includes(pk))); }
 
 function applyTypes(){
+  if (DATASET){                        // 載入實際貨批時，代號以檔案為準
+    PKGS = DATASET.pkgs.slice();
+    PROGS = DATASET.progs.slice();
+    return;
+  }
   PKGS = PKG_ALL.slice(0, Math.max(1, Math.min(6, Math.round(P.pkgTypes))));
   PROGS = PROG_ALL.slice(0, Math.max(1, Math.min(8, Math.round(P.progTypes))));
 }
@@ -505,7 +541,9 @@ const rf = (a,b) => a + rng()*(b-a);
 const nf = n => Math.round(n).toLocaleString("en-US");
 const hhmm = t => String(Math.floor(t/60)).padStart(2,"0")+":"+String(Math.floor(t%60)).padStart(2,"0");
 // 交期可能落在隔天以後（大批貨很常見），跨日就標 D+n
-const dueFmt = t => t < DAY ? hhmm(t) : "D+"+Math.floor(t/DAY)+" "+hhmm(t%DAY);
+const NO_DUE = 1e9;                 // 載入的貨批可以不填交期
+const dueFmt = t => t >= NO_DUE ? "—"
+                  : t < DAY ? hhmm(t) : "D+"+Math.floor(t/DAY)+" "+hhmm(t%DAY);
 
 /* ---------- 狀態 ---------- */
 let S = null, timer = null, acc = 0;
@@ -566,7 +604,7 @@ function newLot(arrive){
   };
 }
 function newMachine(i){
-  const able = (P.cap[i] || PKGS.join("")).split("");
+  const able = capOf(i).length ? capOf(i) : PKGS.slice();
   return {
     id:i, name:"T"+(i+1), speed:(P.speed && P.speed[i]) || 1,
     kit:able[i % able.length], prog:PROGS[i % PROGS.length],
@@ -583,10 +621,18 @@ function init(seed){
   S = { seed:sd, t:0, running:false, speed:1, ended:false, seq:1, lots:[], machines:[],
         nextArrival:P.arrivalEvery, sel:null, log:[], good:0, lots_done:0, engBusy:0,
         goodScore:0, penalty:0, onTime:0, lateDone:0, missed:0, sortBy:"due" };
-  for (let i=0;i<P.machines;i++) S.machines.push(newMachine(i));
-  for (let i=0;i<P.initialLots;i++) S.lots.push(newLot(0));
+  if (DATASET){
+    DATASET.machines.forEach((r,i) => S.machines.push(machineFromRow(r,i)));
+    DATASET.lots.forEach(r => S.lots.push(lotFromRow(r)));
+    const wip = S.lots.filter(l => l.state === "WIP").length;
+    log("載入「"+DATASET.name+"」："+S.lots.length+" 批（WIP "+wip
+        +" 批，之後陸續到貨 "+(S.lots.length-wip)+" 批）／"+S.machines.length+" 台機");
+  } else {
+    for (let i=0;i<P.machines;i++) S.machines.push(newMachine(i));
+    for (let i=0;i<P.initialLots;i++) S.lots.push(newLot(0));
+    log("開工！WIP 已有 "+P.initialLots+" 批待派工（情境種子 "+sd+"）");
+  }
   acc = 0;
-  log("開工！WIP 已有 "+P.initialLots+" 批待派工（情境種子 "+sd+"）");
   render();
 }
 function log(msg){
@@ -637,7 +683,7 @@ function finishPhase(m){
     lot.good = Math.round(lot.qty * lot.baseYield/100);
     lot.pending = lot.qty - lot.good;
   } else {
-    const rec = rf(P.recoverMin, P.recoverMax)/100;
+    const rec = (DET ? (P.recoverMin + P.recoverMax)/2 : rf(P.recoverMin, P.recoverMax))/100;
     const back = Math.round(lot.pending * rec);
     lot.good += back; lot.pending -= back; lot.rt++;
   }
@@ -649,7 +695,7 @@ function finishPhase(m){
   log(m.name+" "+m.phase+" 完成："+lot.id+" 累積良率 "+y+"%"+(next ? " → 進 "+next : " → 出貨"));
   if (next){ startPhase(m, next); return; }
   lot.state = "DONE"; lot.machine = m.name; lot.doneAt = S.t;
-  lot.late = S.t > lot.due;
+  lot.late = lot.due < NO_DUE && S.t > lot.due;
   const w = (lot.hot && !lot.late) ? P.hotBonus : 1;
   m.good += lot.good; m.lots++;
   S.good += lot.good; S.goodScore += lot.good * w; S.lots_done++;
@@ -694,7 +740,13 @@ function assignEngineers(){
 
 function stepMinute(){
   S.t++;
-  if (S.t < DAY && S.t >= S.nextArrival){
+  if (DATASET){
+    // 載入模式：貨批照檔案裡的 arrive_h 進場，不再亂數生成
+    let n = 0, hots = 0;
+    for (const l of S.lots)
+      if (l.state === "SOON" && l.arrive <= S.t){ l.state = "WIP"; n++; if (l.hot) hots++; }
+    if (n) log("到貨 "+n+" 批"+(hots ? "（其中 "+hots+" 批 HOT 優先批）" : ""));
+  } else if (S.t < DAY && S.t >= S.nextArrival){
     const n = ri(1, Math.max(1,P.arrivalBatch));
     let hots = 0;
     for (let i=0;i<n;i++){ const l = newLot(S.t); S.lots.push(l); if (l.hot) hots++; }
@@ -703,6 +755,7 @@ function stepMinute(){
   }
   // 先跑當機判定，再統一配置工程師，最後才推進各機台這一分鐘
   for (const m of S.machines){
+    if (!ready(m)) continue;              // 還沒開放的機台不會當機
     if (m.state !== "DOWN" && rng() < (P.downPerHour/100)/60){
       m.prevState = m.state;
       m.state = "DOWN";
@@ -741,10 +794,12 @@ function stepMinute(){
         if (m.remain <= 0) finishPhase(m);
         break;
       default:
-        if (!m.lot && m.queue.length){ takeNext(m); break; }
+        if (ready(m) && !m.lot && m.queue.length){ takeNext(m); break; }
         m.idle++;
     }
-    // 記下這一分鐘這台機在做什麼（含當時那批貨），合併成連續區段供時間軸使用
+    // 記下這一分鐘這台機在做什麼（含當時那批貨），合併成連續區段供時間軸使用。
+    // SILENT＝批次跑分，沒有畫面要畫，這段直接跳過（跑到清空可能長達數天，區段會爆量）
+    if (SILENT) continue;
     const code = before === "DOWN"  ? (hadEng ? "DOWN" : "WAITFIX")
                : before === "SETUP" ? (hadEng ? "SETUP" : "WAITSET")
                : before === "RUN"   ? (wasRT ? "RT" : "RUN") : "IDLE";
@@ -754,7 +809,7 @@ function stepMinute(){
                 : code === "DOWN"  ? "當機維修" + (beforeLot ? "（"+beforeLot+" 暫停）" : "")
                 : code === "SETUP" ? "改機" + (beforeTarget ? " → "+beforeTarget : "")
                                    + (beforeLot ? "（準備 "+beforeLot+"）" : "")
-                : code === "IDLE"  ? "閒置待料"
+                : code === "IDLE"  ? (ready(m) ? "閒置待料" : "尚未開放（保養／在跑別的貨）")
                                    : beforePhase + " " + beforeLot;
     const last = m.segs[m.segs.length-1];
     if (last && last.c === code && last.t === label) last.b = S.t;
@@ -769,7 +824,7 @@ function utilization(){
 }
 // 收工時未完成、但交期在今天內的批，一樣算逾期
 function finalizePenalty(){
-  const missedLots = S.lots.filter(l => l.state !== "DONE" && l.due <= DAY);
+  const missedLots = S.lots.filter(l => l.state !== "DONE" && l.due <= DAY);   // NO_DUE 遠大於 DAY，自動排除
   for (const l of missedLots) S.penalty += P.latePenalty * (l.hot ? 2 : 1);
   S.missed = missedLots.length;
 }
@@ -778,6 +833,7 @@ function score(){
 }
 // 交期剩餘時間的顯示樣式
 function dueInfo(lot){
+  if (lot.due >= NO_DUE) return { cls:"", txt:"無交期" };
   const left = lot.due - S.t;
   const cls = left < 0 ? "late" : left < 120 ? "warn" : "";
   const txt = left < 0 ? "逾期 "+Math.floor(-left/60)+"h"+String(-left%60).padStart(2,"0")
@@ -786,8 +842,11 @@ function dueInfo(lot){
 }
 
 /* ---------- 操作 ---------- */
+// 機台要過了 readyAt 才算開放（檔案裡的 available_at_h：保養中或還在跑別的貨）
+function ready(m){ return S.t >= (m.readyAt || 0); }
 function assign(m, lot){
   if (m.state !== "IDLE" || m.lot) return;
+  if (!ready(m)){ log("✋ "+m.name+" 還沒開放（"+hhmm(m.readyAt)+" 才空出來）"); return; }
   if (!canRun(m, lot.pkg)){ log("✋ "+m.name+" 不能測封裝 "+lot.pkg+"（"+lot.id+"）"); return; }
   m.lot = lot; lot.state = "ASSIGNED";
   const cost = setupCost(m, lot.pkg, lot.prog);
@@ -1012,7 +1071,7 @@ function render(){
         <div class="mid">
           <div class="mh"><b>${m.name}</b>${m.total ? `<span style="font-size:11px;color:var(--dim)">${Math.round(pct)}%</span>` : ""}<span class="st ${stateCls}">${STATE_LABEL[stateCls]}</span></div>
           <div class="cfg">Kit <span class="tag pkg${m.kit}">${m.kit}</span> 程式 <span class="prog">${m.prog}</span>
-            <span class="cap"><b style="color:${m.speed>=fleetSpeed()?"var(--run)":"var(--setup)"}">×${m.speed}</b><span style="opacity:.6"> (${m.speed} site)</span> · 可測 ${(P.cap[m.id]||"").split("").join("·")}</span></div>
+            <span class="cap"><b style="color:${m.speed>=fleetSpeed()?"var(--run)":"var(--setup)"}">×${m.speed}</b><span style="opacity:.6"> (${m.speed} site)</span> · 可測 ${capOf(m.id).join("·")}</span></div>
         </div>
       </div>
       <div class="job">${job}</div>
@@ -1022,7 +1081,7 @@ function render(){
         <span>改機 ${m.setup} 分（Kit ${m.kitCh} · 程式 ${m.progCh}）</span><span>當機 ${m.down} 分</span>
         <span${m.wait ? ` style="color:var(--setup)"` : ""}>等人 ${m.wait} 分</span></div>
       <div class="tools">
-        <select data-cvp="${m.id}" ${m.state!=="IDLE"||m.lot?"disabled":""}>${opts((P.cap[m.id]||"").split(""),m.kit)}</select>
+        <select data-cvp="${m.id}" ${m.state!=="IDLE"||m.lot?"disabled":""}>${opts(capOf(m.id),m.kit)}</select>
         <select data-cvg="${m.id}" ${m.state!=="IDLE"||m.lot?"disabled":""}>${opts(PROGS,m.prog)}</select>
         <button data-cv="${m.id}" ${m.state!=="IDLE"||m.lot?"disabled":""}>改機</button>
       </div>
@@ -1110,7 +1169,7 @@ function autoPreempt(){
     let victim = null;
     for (const m of S.machines){
       if (m.state !== "RUN" || !m.lot || m.lot.hot) continue;
-      if (!canRun(m, h.pkg)) continue;
+      if (!ready(m) || !canRun(m, h.pkg)) continue;
       if (c.from === m && m.queue[0] === h) continue; // 本來就排在這台第一順位，等一下就輪到了
       const v = m.lot;
       // 被犧牲的批進度歸零要重測，所以用完整工時估它還來不來得及
@@ -1132,13 +1191,14 @@ function autoDispatch(){
   let wip = S.lots.filter(l => l.state === "WIP");
   if (wip.length){
     for (const m of S.machines){
-      if (m.state === "IDLE" && !m.lot && wip.length){
+      if (ready(m) && m.state === "IDLE" && !m.lot && wip.length){
         const best = pickBest(wip.filter(l => canRun(m, l.pkg)), m, pol);
         if (best){ assign(m, best); wip = wip.filter(l => l !== best); }
       }
     }
     const depth = Math.min(A.queueDepth, P.queueMax);
     for (const m of S.machines){
+      if (!ready(m)) continue;
       while (m.queue.length < depth && wip.length){
         const best = pickBest(wip.filter(l => canRun(m, l.pkg)), m, pol);
         if (!best) break;
@@ -1147,6 +1207,428 @@ function autoDispatch(){
     }
   }
   if (A.preempt) autoPreempt();
+}
+
+
+/* ================= 實際貨批：讀 xlsx → 跑到清空為止 =================
+   xlsx 就是一個 zip，瀏覽器原生的 DecompressionStream 就能解，
+   所以這裡不掛任何外部函式庫，整個遊戲維持單一 HTML 檔、離線可開。 */
+let DATASET = null;      // 載入的貨批與機台；null＝用亂數產生的遊戲模式
+let DET = false;         // true＝純排程比較（關當機、良率用固定值）
+
+/* ---- ZIP ---- */
+async function unzip(buf){
+  const dv = new DataView(buf), u8 = new Uint8Array(buf);
+  let eocd = -1;
+  for (let i = u8.length - 22; i >= 0 && i >= u8.length - 66000; i--)
+    if (dv.getUint32(i, true) === 0x06054b50){ eocd = i; break; }
+  if (eocd < 0) throw new Error("這不是有效的 xlsx 檔（找不到 ZIP 結尾）");
+  const count = dv.getUint16(eocd + 10, true);
+  let p = dv.getUint32(eocd + 16, true);
+  const out = {};
+  for (let i = 0; i < count; i++){
+    if (dv.getUint32(p, true) !== 0x02014b50) break;
+    const method = dv.getUint16(p + 10, true);
+    const csize  = dv.getUint32(p + 20, true);
+    const fnLen  = dv.getUint16(p + 28, true);
+    const exLen  = dv.getUint16(p + 30, true);
+    const cmLen  = dv.getUint16(p + 32, true);
+    const lho    = dv.getUint32(p + 42, true);
+    const name   = new TextDecoder().decode(u8.subarray(p + 46, p + 46 + fnLen));
+    const lfn = dv.getUint16(lho + 26, true), lex = dv.getUint16(lho + 28, true);
+    const start = lho + 30 + lfn + lex;
+    const raw = u8.subarray(start, start + csize);
+    out[name] = method === 0 ? raw : await inflateRaw(raw);
+    p += 46 + fnLen + exLen + cmLen;
+  }
+  return out;
+}
+async function inflateRaw(bytes){
+  if (typeof DecompressionStream !== "function")
+    throw new Error("這個瀏覽器不支援解壓縮，請用較新的 Chrome / Edge / Safari");
+  const ds = new DecompressionStream("deflate-raw");
+  const ab = await new Response(new Blob([bytes]).stream().pipeThrough(ds)).arrayBuffer();
+  return new Uint8Array(ab);
+}
+const xmlOf = bytes => new DOMParser().parseFromString(new TextDecoder().decode(bytes), "application/xml");
+
+/* ---- xlsx → { 分頁名: 二維陣列 } ---- */
+async function readXlsx(buf){
+  const files = await unzip(buf);
+  const need = n => { if (!files[n]) throw new Error("xlsx 內容不完整，缺少 " + n); return files[n]; };
+
+  const shared = [];
+  if (files["xl/sharedStrings.xml"])
+    for (const si of xmlOf(files["xl/sharedStrings.xml"]).getElementsByTagName("si"))
+      shared.push(Array.from(si.getElementsByTagName("t")).map(t => t.textContent).join(""));
+
+  const rels = {};
+  for (const r of xmlOf(need("xl/_rels/workbook.xml.rels")).getElementsByTagName("Relationship"))
+    rels[r.getAttribute("Id")] = r.getAttribute("Target").replace(/^\/?xl\//, "");
+
+  const sheets = {};
+  for (const sh of xmlOf(need("xl/workbook.xml")).getElementsByTagName("sheet")){
+    const rid = sh.getAttribute("r:id") || sh.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships", "id");
+    const path = "xl/" + rels[rid];
+    if (!files[path]) continue;
+    sheets[sh.getAttribute("name")] = sheetRows(xmlOf(files[path]), shared);
+  }
+  return sheets;
+}
+function colIndex(ref){                      // "AB12" → 27
+  let n = 0;
+  for (const ch of ref){
+    const c = ch.charCodeAt(0);
+    if (c < 65 || c > 90) break;
+    n = n * 26 + (c - 64);
+  }
+  return n - 1;
+}
+function sheetRows(doc, shared){
+  const rows = [];
+  for (const row of doc.getElementsByTagName("row")){
+    const arr = [];
+    for (const c of row.getElementsByTagName("c")){
+      const i = colIndex(c.getAttribute("r") || "");
+      const t = c.getAttribute("t");
+      let v = null;
+      if (t === "s"){
+        const n = c.getElementsByTagName("v")[0];
+        v = n ? shared[+n.textContent] : null;
+      } else if (t === "inlineStr"){
+        v = Array.from(c.getElementsByTagName("t")).map(x => x.textContent).join("");
+      } else {
+        const n = c.getElementsByTagName("v")[0];
+        if (n) v = t === "str" ? n.textContent : +n.textContent;
+      }
+      if (i >= 0) arr[i] = v;
+    }
+    rows.push(arr);
+  }
+  return rows;
+}
+
+/* ---- 表格 → 貨批與機台 ---- */
+const LOT_KEYS  = ["lot_id","package","program","qty","tpu_sec","arrive_h","due_h","hot","yield_pct","note"];
+const MACH_KEYS = ["machine_id","sites","kit_now","prog_now","can_packages","available_at_h"];
+
+function headerMap(rows, keys){
+  for (let r = 0; r < Math.min(rows.length, 5); r++){
+    const cells = (rows[r] || []).map(v => String(v ?? "").trim().toLowerCase());
+    const map = {};
+    keys.forEach(k => { const i = cells.indexOf(k); if (i >= 0) map[k] = i; });
+    if (map[keys[0]] !== undefined && Object.keys(map).length >= 3) return { map, from: r + 1 };
+  }
+  return null;
+}
+const num = v => { const n = +v; return Number.isFinite(n) ? n : null; };
+const str = v => { const t = String(v ?? "").trim(); return t === "" ? null : t; };
+
+function parseDataset(sheets, fileName){
+  const lotSheet  = sheets["貨批"] || sheets["lots"] || sheets["Lots"];
+  const machSheet = sheets["機台"] || sheets["machines"] || sheets["Machines"];
+  if (!lotSheet)  throw new Error("找不到「貨批」分頁");
+  if (!machSheet) throw new Error("找不到「機台」分頁");
+
+  const lh = headerMap(lotSheet, LOT_KEYS);
+  const mh = headerMap(machSheet, MACH_KEYS);
+  if (!lh) throw new Error("「貨批」分頁找不到欄位標題列（需要 lot_id / package / program…）");
+  if (!mh) throw new Error("「機台」分頁找不到欄位標題列（需要 machine_id / sites…）");
+
+  const problems = [], lots = [], machines = [];
+  const seen = new Set();
+
+  for (let r = lh.from; r < lotSheet.length; r++){
+    const row = lotSheet[r] || [];
+    const g = k => lh.map[k] === undefined ? null : row[lh.map[k]];
+    const id = str(g("lot_id"));
+    if (!id) continue;                                  // 空白列直接略過
+    const pkg = str(g("package")), prog = str(g("program"));
+    const qty = num(g("qty")), tpu = num(g("tpu_sec"));
+    const where = "貨批 第 " + (r + 1) + " 列（" + id + "）";
+    if (seen.has(id)){ problems.push(where + "：批號重複"); continue; }
+    if (!pkg || !prog){ problems.push(where + "：package / program 不能空白"); continue; }
+    if (!(qty > 0)){ problems.push(where + "：qty 要是大於 0 的數字"); continue; }
+    if (!(tpu > 0)){ problems.push(where + "：tpu_sec 要是大於 0 的數字"); continue; }
+    seen.add(id);
+    const y = num(g("yield_pct"));
+    lots.push({
+      id, pkg, prog, qty: Math.round(qty), tpu,
+      arrive: Math.max(0, num(g("arrive_h")) || 0),
+      due: num(g("due_h")),
+      hot: /^(y|yes|1|true|hot)$/i.test(String(g("hot") ?? "")),
+      yield: y !== null && y > 0 && y <= 100 ? y : null,
+      note: str(g("note")) || ""
+    });
+  }
+
+  const mseen = new Set();
+  for (let r = mh.from; r < machSheet.length; r++){
+    const row = machSheet[r] || [];
+    const g = k => mh.map[k] === undefined ? null : row[mh.map[k]];
+    const id = str(g("machine_id"));
+    if (!id) continue;
+    const sites = num(g("sites"));
+    const where = "機台 第 " + (r + 1) + " 列（" + id + "）";
+    if (mseen.has(id)){ problems.push(where + "：機台名稱重複"); continue; }
+    if (!(sites > 0)){ problems.push(where + "：sites 要是大於 0 的數字"); continue; }
+    mseen.add(id);
+    machines.push({
+      id, sites: Math.min(64, sites),
+      kit: str(g("kit_now")), prog: str(g("prog_now")),
+      can: (str(g("can_packages")) || "").split(/[|,、\/]/).map(x => x.trim()).filter(Boolean),
+      avail: Math.max(0, num(g("available_at_h")) || 0)
+    });
+  }
+
+  if (!lots.length)     throw new Error("「貨批」分頁沒有讀到任何有效資料");
+  if (!machines.length) throw new Error("「機台」分頁沒有讀到任何有效資料");
+
+  // 代號以檔案為準：貨批與機台出現過的都算，順序照第一次出現
+  const pkgs = [], progs = [];
+  const add = (a, v) => { if (v && !a.includes(v)) a.push(v); };
+  lots.forEach(l => { add(pkgs, l.pkg); add(progs, l.prog); });
+  machines.forEach(m => { add(pkgs, m.kit); add(progs, m.prog); m.can.forEach(c => add(pkgs, c)); });
+
+  // 能測的封裝若填了檔案裡不存在的代號，視同沒填（全部都能測），並提醒
+  machines.forEach(m => {
+    const bad = m.can.filter(c => !pkgs.includes(c));
+    if (bad.length) problems.push("機台 " + m.id + "：can_packages 的 " + bad.join("、") + " 在資料裡沒出現過");
+    m.can = m.can.filter(c => pkgs.includes(c));
+  });
+  const orphan = pkgs.filter(pk => !machines.some(m => !m.can.length || m.can.includes(pk)));
+  if (orphan.length)
+    problems.push("封裝 " + orphan.join("、") + " 沒有任何機台能測，這些批永遠做不完——請補上機台能力");
+
+  return { name: fileName, lots, machines, pkgs, progs, problems, orphan };
+}
+
+/* ---- 套用到參數：機台數、site 數、能力矩陣都以檔案為準 ---- */
+function applyDataset(ds){
+  DATASET = ds;
+  P.machines  = ds.machines.length;
+  P.pkgTypes  = ds.pkgs.length;
+  P.progTypes = ds.progs.length;
+  P.speed = ds.machines.map(m => m.sites);
+  P.cap   = ds.machines.map(m => m.can.length ? m.can.slice() : ds.pkgs.slice());
+  applyTypes(); normalizeCap(); normalizeSpeed();
+}
+function clearDataset(){
+  DATASET = null;
+  applyPreset($("#presetSel").value || "game");   // 回到原本的參數組
+}
+
+/* ---- 從檔案的一列建出貨批／機台 ---- */
+function lotFromRow(r){
+  const size = r.qty < 2000 ? "S" : r.qty < 10000 ? "M" : "L";
+  const arrive = Math.round(r.arrive * 60);
+  return {
+    id: r.id, pkg: r.pkg, prog: r.prog, qty: r.qty, size, tpu: r.tpu,
+    baseYield: r.yield !== null ? r.yield
+             : DET ? (P.yieldMin + P.yieldMax) / 2 : +rf(P.yieldMin, P.yieldMax).toFixed(1),
+    arrive, hot: r.hot,
+    due: r.due === null ? NO_DUE : Math.round(r.due * 60),
+    state: arrive > 0 ? "SOON" : "WIP",
+    good: 0, pending: 0, cum: 0, rt: 0, machine: null, late: false, doneAt: null, note: r.note
+  };
+}
+function machineFromRow(r, i){
+  const m = newMachine(i);
+  m.name = r.id;
+  m.kit  = r.kit  && PKGS.includes(r.kit)   ? r.kit  : null;   // null＝空機，第一批要換 Kit
+  m.prog = r.prog && PROGS.includes(r.prog) ? r.prog : null;
+  m.readyAt = Math.round(r.avail * 60);
+  return m;
+}
+
+/* ---- 跑到這批貨清空為止 ---- */
+const CLEAR_LIMIT = 60 * 24 * 30;            // 安全上限 30 天
+function allCleared(){ return S.lots.every(l => l.state === "DONE"); }
+
+function runToClear(policyId, seed){
+  const keep = { S, rng, SILENT, pol: A.policy, down: P.downPerHour };
+  SILENT = true; A.policy = policyId;
+  if (DET) P.downPerHour = 0;
+  init(seed);
+  const curve = [{ t: 0, n: 0 }];
+  let stall = 0, lastDone = 0;
+  while (S.t < CLEAR_LIMIT){
+    stepMinute(); autoDispatch();
+    const n = S.lots_done;
+    if (S.t % 60 === 0) curve.push({ t: S.t, n });
+    if (n > lastDone){ lastDone = n; stall = 0; } else stall++;
+    if (n === S.lots.length) break;
+    // 沒有任何機台在動、也沒有貨在等 → 再跑也不會完成
+    if (stall > 60 * 48 && !S.machines.some(m => m.state === "RUN" || m.state === "SETUP" || m.state === "DOWN")) break;
+  }
+  const done = S.lots.filter(l => l.state === "DONE");
+  const makespan = done.length ? Math.max(...done.map(l => l.doneAt)) : S.t;
+  curve.push({ t: makespan, n: done.length });
+  const sum = f => S.machines.reduce((a, m) => a + f(m), 0);
+  const r = {
+    policy: policyId, makespan, cleared: done.length, total: S.lots.length,
+    good: S.good,
+    late: done.filter(l => l.due < NO_DUE && l.doneAt > l.due).length,
+    util: utilization(),
+    kit: sum(m => m.kitCh), prog: sum(m => m.progCh),
+    setup: sum(m => m.setup), wait: sum(m => m.wait), down: sum(m => m.down),
+    curve
+  };
+  S = keep.S; rng = keep.rng; SILENT = keep.SILENT; A.policy = keep.pol; P.downPerHour = keep.down;
+  return r;
+}
+// 理論最短（分鐘）：純測試工時 ÷ 機隊等效 site 總數。排程再好也快不過它。
+function clearFloor(){
+  if (!DATASET) return 0;
+  const work = DATASET.lots.reduce((a, l) => a + l.qty * l.tpu / 60, 0);
+  const sites = DATASET.machines.reduce((a, m) => a + m.sites, 0);
+  return work / sites;
+}
+
+/* ---- 介面 ---- */
+const hhm = t => Math.floor(t/60) + " 小時 " + String(Math.round(t%60)).padStart(2,"0") + " 分";
+
+async function loadWipFile(file){
+  const st = $("#wipHint");
+  st.innerHTML = "讀取中…";
+  try {
+    const ds = parseDataset(await readXlsx(await file.arrayBuffer()), file.name);
+    applyDataset(ds);
+    buildParams(); buildCapUI(); syncRules();
+    reset();
+    $("#wipName").textContent = ds.name;
+    $("#wipClear").style.display = "";
+    $("#wipRun").style.display = "";
+    $("#wipEng").value = Math.max(P.engineers, Math.ceil(ds.machines.length / 2.5));
+    showWipSummary(ds);
+    st.innerHTML = "已載入。機台數、site 數、能力矩陣都改成檔案裡的設定；"
+      + "工程師人數與改機時間仍沿用下方「背景參數」，可以改了再跑。";
+  } catch(e){
+    st.innerHTML = '<b style="color:var(--down)">讀取失敗：' + e.message + "</b>";
+    $("#wipSummary").innerHTML = "";
+  }
+}
+function showWipSummary(ds){
+  const qty  = ds.lots.reduce((a,l) => a + l.qty, 0);
+  const work = ds.lots.reduce((a,l) => a + l.qty * l.tpu / 60, 0);
+  const sites = ds.machines.reduce((a,m) => a + m.sites, 0);
+  const wip = ds.lots.filter(l => !l.arrive).length;
+  const hot = ds.lots.filter(l => l.hot).length;
+  const noDue = ds.lots.filter(l => l.due === null).length;
+  const cell = (v,l) => `<td><b style="font-size:16px">${v}</b><br><span style="color:var(--dim);font-size:11px">${l}</span></td>`;
+  $("#wipSummary").innerHTML =
+    `<table style="margin-top:10px"><tr>
+       ${cell(ds.lots.length + " 批", "其中 WIP " + wip + " 批・HOT " + hot + " 批")}
+       ${cell(nf(qty) + " 顆", "總量")}
+       ${cell(ds.pkgs.length + " 種封裝", ds.pkgs.slice(0,6).join("・") + (ds.pkgs.length>6?"…":""))}
+       ${cell(ds.progs.length + " 種程式", noDue ? noDue + " 批沒填交期" : "全部都有交期")}
+       ${cell(ds.machines.length + " 台機", "機隊 " + sites + " site")}
+       ${cell(hhm(work / sites), "理論最短清空時間")}
+       ${cell(nf(work/60) + " 機時", "純測試工時（1 site）")}
+     </tr></table>`
+    + (ds.problems.length
+        ? `<div class="adesc" style="color:var(--setup)">⚠ 檔案有 ${ds.problems.length} 個問題：<br>`
+          + ds.problems.slice(0,8).map(x => "・" + x).join("<br>")
+          + (ds.problems.length > 8 ? "<br>…（其餘 " + (ds.problems.length-8) + " 項略）" : "") + "</div>"
+        : `<div class="adesc">資料檢查通過，沒有發現問題。</div>`);
+}
+
+function runWipBench(){
+  if (!DATASET) return;
+  if (DATASET.orphan.length){
+    $("#wipStatus").innerHTML = '<b style="color:var(--down)">有封裝沒有任何機台能測，跑不完。請先修正檔案。</b>';
+    return;
+  }
+  DET = $("#wipMode").value === "det";
+  P.engineers = Math.max(1, Math.min(99, Math.round(+$("#wipEng").value) || P.engineers));
+  const reps = DET ? 1 : Math.max(1, Math.min(30, +$("#wipReps").value || 1));
+  const jobs = [];
+  for (const pol of POLICIES) for (let sd = 1; sd <= reps; sd++) jobs.push([pol.id, sd]);
+  const acc = {}; POLICIES.forEach(p => acc[p.id] = []);
+  let i = 0;
+  $("#wipGo").disabled = true;
+  const step = () => {
+    const t0 = performance.now();
+    while (i < jobs.length && performance.now() - t0 < 60){
+      const [pid, sd] = jobs[i++];
+      acc[pid].push(runToClear(pid, sd));
+    }
+    $("#wipStatus").textContent = `跑分中… ${i}/${jobs.length}`;
+    if (i < jobs.length) setTimeout(step, 0);
+    else {
+      DET = false;
+      $("#wipStatus").textContent = `完成：${POLICIES.length} 個法則 × ${reps} 次`;
+      $("#wipGo").disabled = false;
+      buildParams(); render();          // 工程師人數可能被跑分改掉，讓畫面跟著更新
+      showWipBench(acc, reps);
+    }
+  };
+  setTimeout(step, 0);
+}
+function showWipBench(acc, reps){
+  const floor = clearFloor();
+  const rows = POLICIES.map(p => {
+    const r = acc[p.id];
+    const ms = r.map(x => x.makespan);
+    return { p, r,
+      makespan: avg(ms), worst: Math.max(...ms),
+      cleared: avg(r.map(x => x.cleared)), total: r[0].total,
+      late: avg(r.map(x => x.late)), util: avg(r.map(x => x.util)),
+      kit: avg(r.map(x => x.kit)), prog: avg(r.map(x => x.prog)),
+      setup: avg(r.map(x => x.setup)), wait: avg(r.map(x => x.wait)),
+      curve: r[0].curve };
+  }).sort((a,b) => a.makespan - b.makespan);
+  const best = rows[0].makespan, worst = rows[rows.length-1].makespan;
+
+  $("#wipTable").innerHTML =
+    `<table style="margin-top:10px"><tr>
+       <th>排程法則</th><th>清空時間</th><th>比最快慢</th><th>比理論下限多</th>
+       <th>完成批數</th><th>逾期批</th><th>稼動率</th>
+       <th>換 Kit</th><th>換程式</th><th>改機分鐘</th><th>等工程師分鐘</th>${reps>1?"<th>最差</th>":""}</tr>`
+    + rows.map((r,i) => `<tr class="${i===0?"best":""}">
+        <td>${r.p.name}</td>
+        <td><b>${hhm(r.makespan)}</b></td>
+        <td>${i === 0 ? "—" : "+" + hhm(r.makespan - best)}</td>
+        <td>+${((r.makespan/floor - 1)*100).toFixed(0)}%</td>
+        <td>${r.cleared.toFixed(0)} / ${r.total}</td>
+        <td>${r.late.toFixed(1)}</td>
+        <td>${r.util.toFixed(1)}%</td>
+        <td>${r.kit.toFixed(0)}</td><td>${r.prog.toFixed(0)}</td>
+        <td>${nf(r.setup)}</td><td>${nf(r.wait)}</td>
+        ${reps>1?`<td>${hhm(r.worst)}</td>`:""}</tr>`).join("")
+    + `</table>`
+    + `<div class="adesc">理論最短 <b>${hhm(floor)}</b>（純測試工時 ÷ 機隊 site 數，零改機零當機）。
+        最快與最慢的法則差 <b>${hhm(worst - best)}</b>，同一批貨、同一組機台，差別只在先做哪一批。</div>`;
+  drawWipCurve(rows);
+}
+function drawWipCurve(rows){
+  const W = 760, H = 260, padL = 46, padR = 14, padT = 12, padB = 30;
+  const maxT = Math.max(...rows.map(r => r.makespan));
+  const maxN = rows[0].total;
+  const x = t => padL + t / maxT * (W - padL - padR);
+  const y = n => padT + (1 - n / maxN) * (H - padT - padB);
+  const grid = [0,.25,.5,.75,1].map(f => {
+    const n = maxN * f;
+    return `<line x1="${padL}" x2="${W-padR}" y1="${y(n).toFixed(1)}" y2="${y(n).toFixed(1)}" stroke="#2b3442"/>
+      <text x="${padL-8}" y="${(y(n)+3.5).toFixed(1)}" text-anchor="end" fill="#8b949e" font-size="10">${Math.round(n)}</text>`;
+  }).join("");
+  const hours = Math.ceil(maxT/60);
+  const stepH = Math.max(1, Math.ceil(hours/10));
+  let xt = "";
+  for (let h = 0; h <= hours; h += stepH)
+    xt += `<text x="${x(h*60).toFixed(1)}" y="${H-10}" text-anchor="middle" fill="#8b949e" font-size="10">${h}h</text>`;
+  const lines = rows.map(r => {
+    const d = r.curve.map((pt,i) => `${i?"L":"M"}${x(Math.min(pt.t,maxT)).toFixed(1)} ${y(pt.n).toFixed(1)}`).join(" ");
+    return `<path d="${d}" fill="none" stroke="${hue(r.p.id)}" stroke-width="2" stroke-linejoin="round"/>`;
+  }).join("");
+  const legend = rows.map(r => `<span><i style="background:${hue(r.p.id)}"></i>${r.p.name}</span>`).join("");
+  $("#wipChart").innerHTML =
+    `<div class="legend" style="margin-top:12px">${legend}</div>
+     <div class="chartWrap">
+       <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block">${grid}${xt}${lines}</svg>
+     </div>
+     <div class="adesc">完成曲線：橫軸＝開工後經過的小時，縱軸＝累積完成批數。
+       線越早爬到頂代表整批越早清空；前段陡、尾巴長，表示小批先做完、大批卡在最後。</div>`;
 }
 
 /* ---------- 批次跑分 ---------- */
@@ -1570,8 +2052,8 @@ function buildCapUI(){
   $("#capTable").innerHTML =
     `<table><tr><th>機台</th>${PKGS.map(k => `<th><span class="tag pkg${k}">${k}</span></th>`).join("")}
        <th>速度×</th></tr>`
-    + P.cap.map((c,i) => `<tr><td>T${i+1}</td>`
-        + PKGS.map(k => `<td><input type="checkbox" data-cap="${i}:${k}" ${c.includes(k)?"checked":""}></td>`).join("")
+    + P.cap.map((c,i) => `<tr><td>${S && S.machines[i] ? S.machines[i].name : "T"+(i+1)}</td>`
+        + PKGS.map(k => `<td><input type="checkbox" data-cap="${i}:${k}" ${capArr(c).includes(k)?"checked":""}></td>`).join("")
         + `<td><input type="number" data-spd="${i}" value="${P.speed[i]}" step="0.5" min="0.1" max="64"
               style="width:56px;background:var(--panel2);color:var(--txt);border:1px solid var(--line);
                      border-radius:5px;padding:2px 5px;text-align:right;font-family:inherit"></td>`
@@ -1590,7 +2072,7 @@ function buildCapUI(){
     el.onchange = () => {
       const [i, k] = el.dataset.cap.split(":");
       const idx = +i;
-      let c = P.cap[idx].split("");
+      let c = capOf(idx).slice();
       if (el.checked) { if (!c.includes(k)) c.push(k); }
       else c = c.filter(x => x !== k);
       if (!c.length){                       // 不允許一台機什麼都不能測
@@ -1598,14 +2080,14 @@ function buildCapUI(){
         $("#capWarn").textContent = `T${idx+1} 至少要保留一種封裝。`;
         return;
       }
-      P.cap[idx] = PKGS.filter(x => c.includes(x)).join("");
+      P.cap[idx] = PKGS.filter(x => c.includes(x));
       capWarn(); render();
     };
   });
   capWarn();
 }
 function capWarn(){
-  const orphan = PKGS.filter(k => !P.cap.some(c => c.includes(k)));
+  const orphan = PKGS.filter(k => !P.cap.some(c => capArr(c).includes(k)));
   $("#capWarn").innerHTML = orphan.length
     ? `⚠ 封裝 <b>${orphan.join("、")}</b> 目前沒有任何機台能測，這些封裝的貨批不會進來。`
     : `每種封裝都至少有一台機台可以測。`;
@@ -1790,6 +2272,35 @@ function buildAlgo(){
   $("#daysIn").onchange = e => A.days = +e.target.value;
   $("#runBench").onclick = runBatch;
   $("#runRatio").onclick = runRatioBench;
+  bindWipUI();
+}
+function bindWipUI(){
+  $("#wipPick").onclick = () => $("#wipFile").click();
+  $("#wipFile").onchange = e => { const f = e.target.files[0]; if (f) loadWipFile(f); e.target.value = ""; };
+  $("#wipClear").onclick = () => {
+    clearDataset();
+    $("#wipName").textContent = "尚未載入";
+    $("#wipClear").style.display = "none";
+    $("#wipRun").style.display = "none";
+    $("#wipSummary").innerHTML = $("#wipTable").innerHTML = $("#wipChart").innerHTML = "";
+    $("#wipStatus").textContent = "";
+  };
+  $("#wipMode").onchange = e => {
+    $("#wipReps").disabled = e.target.value === "det";
+  };
+  $("#wipGo").onclick = runWipBench;
+  // 直接把檔案拖到頁面上也可以
+  const stop = e => { e.preventDefault(); e.stopPropagation(); };
+  document.addEventListener("dragover", stop);
+  document.addEventListener("drop", e => {
+    stop(e);
+    const f = e.dataTransfer && e.dataTransfer.files[0];
+    if (f && /\.xlsx$/i.test(f.name)){
+      const d = $("#wipPanelDetails");
+      if (d) d.open = true;
+      loadWipFile(f);
+    }
+  });
 }
 function buildDueRuleUI(){
   $("#dueRuleSel").innerHTML = DUE_RULES.map(r =>

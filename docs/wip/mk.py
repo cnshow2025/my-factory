@@ -1,0 +1,184 @@
+# -*- coding: utf-8 -*-
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.worksheet.datavalidation import DataValidation
+from openpyxl.comments import Comment
+from openpyxl.utils import get_column_letter
+
+F = "Arial"
+NAVY  = "1E2761"; TEAL = "1C7293"; ICE = "EAF0FA"; YELLOW = "FFF6D6"
+GREY  = "5A6785"; INK = "16213E"
+thin  = Side(style="thin", color="C9D2E2")
+BOX   = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+def hdr(ws, row, cols, fill=NAVY):
+    for c, (key, note) in enumerate(cols, start=1):
+        cell = ws.cell(row=row, column=c, value=key)
+        cell.font = Font(name=F, bold=True, color="FFFFFF", size=10)
+        cell.fill = PatternFill("solid", fgColor=fill)
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border = BOX
+        if note:
+            cm = Comment(note, "MyFactory"); cm.width = 320; cm.height = 110
+            cell.comment = cm
+
+def put(ws, row, values, blue=False):
+    for c, v in enumerate(values, start=1):
+        cell = ws.cell(row=row, column=c, value=v)
+        cell.font = Font(name=F, size=10, color="0000FF" if blue else INK)
+        cell.border = BOX
+        cell.alignment = Alignment(horizontal="left" if isinstance(v, str) else "right")
+
+wb = Workbook()
+
+# ============ 說明 ============
+ws = wb.active; ws.title = "說明"
+ws.sheet_view.showGridLines = False
+ws.column_dimensions["A"].width = 18
+ws.column_dimensions["B"].width = 10
+ws.column_dimensions["C"].width = 62
+ws.column_dimensions["D"].width = 26
+
+def title(r, t):
+    c = ws.cell(row=r, column=1, value=t)
+    c.font = Font(name=F, bold=True, size=13, color=NAVY)
+
+def sub(r, t):
+    c = ws.cell(row=r, column=1, value=t)
+    c.font = Font(name=F, size=10, color=GREY)
+
+ws["A1"] = "MyFactory 實際貨批模擬 — 填寫範本"
+ws["A1"].font = Font(name=F, bold=True, size=16, color=NAVY)
+sub(2, "填好這份檔案後載入模擬器，就會用你真實的 WIP 跑各種排程法則，比較「這批貨全部做完要多久」。")
+
+title(4, "怎麼填")
+rows = [
+ ("1", "「貨批」分頁", "一列一批待測貨。把現場 WIP 清單貼進來，必填欄位不能空白。", ""),
+ ("2", "「機台」分頁", "一列一台測試機，包含它現在裝著什麼 Kit、載著什麼程式。", ""),
+ ("3", "藍色字的範例列", "第 2 列起的藍色字是範例，照格式填好自己的資料後把它們刪掉。", ""),
+ ("4", "欄位標題", "滑鼠移到標題格會跳出這個欄位的中文說明。", ""),
+ ("5", "代號自由命名", "package / program 直接用你現場的名字，種類多少都可以，模擬器會自動吃進去。", ""),
+]
+for i, (n, a, b, _) in enumerate(rows):
+    r = 5 + i
+    ws.cell(row=r, column=1, value=a).font = Font(name=F, bold=True, size=10, color=INK)
+    ws.cell(row=r, column=3, value=b).font = Font(name=F, size=10, color=INK)
+
+title(11, "貨批 — 欄位說明")
+hdr(ws, 12, [("欄位", None), ("必填", None), ("說明", None), ("範例", None)], fill=TEAL)
+LOTS_DOC = [
+ ("lot_id",    "必填", "批號，不可重複。直接用現場批號。", "LOT-0001"),
+ ("package",   "必填", "封裝／Kit 代號。同代號＝同一套 Kit，換到不同代號才要換 Kit（60 分）。", "QFN48"),
+ ("program",   "必填", "測試程式名稱或版本。package 相同但 program 不同＝只換程式（30 分）。", "MCU01_V3"),
+ ("qty",       "必填", "這批的顆數。", "8000"),
+ ("tpu_sec",   "必填", "單一 site 測一顆要幾秒。不是整批時間，也不是多 site 的等效時間。", "2.1"),
+ ("arrive_h",  "選填", "到廠時間，以「現在」為 0 的小時數。空白＝已經在 WIP 裡等著。", "0"),
+ ("due_h",     "選填", "交期，同樣以現在為 0 的小時數。空白＝這批不看交期。", "36"),
+ ("hot",       "選填", "Y＝急件（可插單）。空白或 N＝一般批。", "N"),
+ ("yield_pct", "選填", "這個料號的實際良率百分比。空白＝用參數設定的隨機區間。", "96.5"),
+ ("note",      "選填", "備註，不影響模擬結果。", "主力機種"),
+]
+for i, row in enumerate(LOTS_DOC):
+    r = 13 + i
+    put(ws, r, list(row))
+    ws.cell(row=r, column=1).font = Font(name=F, bold=True, size=10, color=INK)
+    if row[1] == "必填":
+        ws.cell(row=r, column=2).font = Font(name=F, bold=True, size=10, color="C2410C")
+
+title(24, "機台 — 欄位說明")
+hdr(ws, 25, [("欄位", None), ("必填", None), ("說明", None), ("範例", None)], fill=TEAL)
+MACH_DOC = [
+ ("machine_id",     "必填", "機台名稱。", "T01"),
+ ("sites",          "必填", "site 數，直接當速度倍率。8 site 的機台填 8，同一批只要 1 site 的 1/8 時間。", "8"),
+ ("kit_now",        "選填", "現在機台上裝著的 Kit，填 package 代號。空白＝空機，第一批要先換 Kit。", "QFN48"),
+ ("prog_now",       "選填", "現在載入的測試程式。空白＝沒有程式，第一批要載入。", "MCU01_V3"),
+ ("can_packages",   "選填", "這台能測哪些封裝，用直線 | 分隔。空白＝全部都能測。", "QFN48|QFN32"),
+ ("available_at_h", "選填", "幾小時後才空出來（正在跑別的貨、保養中）。空白＝現在就能用。", "0"),
+]
+for i, row in enumerate(MACH_DOC):
+    r = 26 + i
+    put(ws, r, list(row))
+    ws.cell(row=r, column=1).font = Font(name=F, bold=True, size=10, color=INK)
+    if row[1] == "必填":
+        ws.cell(row=r, column=2).font = Font(name=F, bold=True, size=10, color="C2410C")
+
+title(34, "填完自動檢查（不用手動算，改資料會跟著變）")
+CHK = [
+ ("貨批筆數",              "=COUNTA(貨批!A2:A2000)",                                   "筆"),
+ ("總顆數",                "=SUM(貨批!D2:D2000)",                                      "顆"),
+ ("純測試工時（1 site）",  "=SUMPRODUCT(貨批!D2:D2000,貨批!E2:E2000)/3600",            "小時"),
+ ("機台台數",              "=COUNTA(機台!A2:A200)",                                    "台"),
+ ("機隊等效 site 總數",    "=SUM(機台!B2:B200)",                                       "site"),
+ ("理論最短清空時間",      "=IFERROR(C38/C40,0)",                                      "小時（不含改機與當機，排程再好也快不過這個）"),
+]
+hdr(ws, 35, [("項目", None), ("", None), ("數值", None), ("單位", None)], fill=TEAL)
+for i, (label, formula, unit) in enumerate(CHK):
+    r = 36 + i
+    ws.cell(row=r, column=1, value=label).font = Font(name=F, bold=True, size=10, color=INK)
+    c = ws.cell(row=r, column=3, value=formula)
+    c.font = Font(name=F, size=10, color=INK); c.number_format = "#,##0.0"
+    c.fill = PatternFill("solid", fgColor=ICE); c.border = BOX
+    ws.cell(row=r, column=4, value=unit).font = Font(name=F, size=10, color=GREY)
+
+sub(43, "「理論最短清空時間」＝ 純測試工時 ÷ 機隊等效 site 總數。它假設零改機、零當機、機台永遠不閒著，")
+sub(44, "所以實際一定比它長。模擬跑出來的數字離它多遠，就是改機與排程吃掉的部分。")
+
+# ============ 貨批 ============
+ws = wb.create_sheet("貨批")
+LOT_COLS = [
+ ("lot_id",    "批號\n必填。不可重複，直接用現場批號。"),
+ ("package",   "封裝／Kit 代號\n必填。同代號＝同一套 Kit；換到不同代號才要換 Kit（60 分）。"),
+ ("program",   "測試程式\n必填。package 相同但 program 不同＝只換程式（30 分）。"),
+ ("qty",       "顆數\n必填。"),
+ ("tpu_sec",   "單 site 單顆測試秒數\n必填。不是整批時間，也不是多 site 的等效時間。"),
+ ("arrive_h",  "到廠時間（小時）\n選填。以「現在」為 0。空白＝已經在 WIP 裡。"),
+ ("due_h",     "交期（小時）\n選填。以「現在」為 0。空白＝這批不看交期。"),
+ ("hot",       "急件\n選填。Y＝急件可插單；空白或 N＝一般批。"),
+ ("yield_pct", "良率 %\n選填。填了就用這個值；空白＝用參數的隨機區間。"),
+ ("note",      "備註\n選填。不影響模擬。"),
+]
+hdr(ws, 1, LOT_COLS)
+LOT_ROWS = [
+ ["LOT-0001", "QFN48",   "MCU01_V3",  8000, 2.1, 0, 36, "N", 96.5, "主力機種"],
+ ["LOT-0002", "QFN48",   "MCU01_V3", 12000, 2.1, 0, 48, "N", None, "同料號續批，不用改機"],
+ ["LOT-0003", "QFN32",   "PMIC07_V2", 1500, 3.4, 0, 12, "Y", 92.0, "客戶催料"],
+ ["LOT-0004", "SOP16",   "LED03_V1", 25000, 1.2, 6, 72, "N", None, "6 小時後才到廠"],
+ ["LOT-0005", "QFN48",   "MCU01_V5",  5000, 2.3, 0, 24, "N", None, "同 Kit 換程式"],
+]
+for i, r in enumerate(LOT_ROWS):
+    put(ws, 2 + i, r, blue=True)
+widths = [13, 12, 13, 9, 13, 12, 11, 7, 10, 26]
+for i, w in enumerate(widths, start=1):
+    ws.column_dimensions[get_column_letter(i)].width = w
+ws.freeze_panes = "A2"
+ws.row_dimensions[1].height = 22
+dv = DataValidation(type="list", formula1='"Y,N"', allow_blank=True)
+ws.add_data_validation(dv); dv.add("H2:H2000")
+
+# ============ 機台 ============
+ws = wb.create_sheet("機台")
+MACH_COLS = [
+ ("machine_id",     "機台名稱\n必填。"),
+ ("sites",          "site 數\n必填。直接當速度倍率：8 site 填 8，同一批只要 1 site 的 1/8 時間。"),
+ ("kit_now",        "目前裝的 Kit\n選填。填 package 代號。空白＝空機，第一批要先換 Kit。"),
+ ("prog_now",       "目前載入的程式\n選填。空白＝沒有程式，第一批要載入。"),
+ ("can_packages",   "能測的封裝\n選填。用直線 | 分隔，例如 QFN48|QFN32。空白＝全部都能測。"),
+ ("available_at_h", "幾小時後空出來\n選填。正在跑別的貨或保養中。空白＝現在就能用。"),
+]
+hdr(ws, 1, MACH_COLS)
+MACH_ROWS = [
+ ["T01", 8, "QFN48", "MCU01_V3",  "QFN48|QFN32",   0],
+ ["T02", 8, "QFN48", "MCU01_V5",  "QFN48|QFN32",   0],
+ ["T03", 4, "QFN32", "PMIC07_V2", None,            0],
+ ["T04", 4, None,    None,        "SOP16|TSSOP28", 0],
+ ["T05", 2, "SOP16", "LED03_V1",  "SOP16",         4],
+]
+for i, r in enumerate(MACH_ROWS):
+    put(ws, 2 + i, r, blue=True)
+for i, w in enumerate([13, 8, 14, 16, 24, 17], start=1):
+    ws.column_dimensions[get_column_letter(i)].width = w
+ws.freeze_panes = "A2"
+ws.row_dimensions[1].height = 22
+
+wb.save("../待測貨批_填寫範本.xlsx")
+print("saved")
