@@ -357,7 +357,7 @@
           <button id="presetSave">💾 存成「我的工廠」</button>
         </div>
         <div class="adesc" id="presetDesc" style="margin-top:6px"></div>
-        <div class="capline" style="margin-top:12px">機台能力矩陣 — 勾選哪台機可以測哪種封裝。<b>取消勾選＝該機台不能生產該封裝</b>，派工、預約、改機、插單、整批移轉都會被擋下來，自動排程也不會派給它。最右邊的<b>速度×</b>是該機台的測試速度倍率（多 site 或新機台會比較快），<b>2.0 代表同一批只要一半時間</b>；「Speed-aware」策略會把大批優先派給快機。</div>
+        <div class="capline" style="margin-top:12px">機台能力矩陣 — 勾選哪台機可以測哪種封裝。<b>取消勾選＝該機台不能生產該封裝</b>，派工、預約、改機、插單、整批移轉都會被擋下來，自動排程也不會派給它。最右邊的<b>速度×</b>就是該機台的<b>等效 site 數</b>（機台能力的綜合倍率）：測試時間內的產出 ＝ 速度 × 單 site 產出，所以 <b>8 site 的機台填 8，同一批只要 1/8 時間</b>；4 site 填 4，單 site 填 1。下方的「單顆測試時間」指的是<b>單一 site</b> 測一顆要幾秒。「Speed-aware」策略會把大批優先派給速度快的機台。</div>
         <div id="capTable"></div>
         <div class="capline" id="capWarn" style="margin-top:6px"></div>
         <div id="params" style="margin-top:10px"></div>
@@ -433,7 +433,7 @@ const LABEL = {
   qtySmallMin:["小批量下限","顆"], qtySmallMax:["小批量上限","顆"],
   qtyMidMin:["中批量下限","顆"], qtyMidMax:["中批量上限","顆"],
   qtyBigMin:["大批量下限","顆"], qtyBigMax:["大批量上限","顆"],
-  tpuMin:["單顆測試下限","秒"], tpuMax:["單顆測試上限","秒"],
+  tpuMin:["單顆測試下限","秒/site"], tpuMax:["單顆測試上限","秒/site"],
   utilWeight:["稼動率加權","×"],
   pkgTypes:["封裝種類數","種"], progTypes:["測試程式種類數","種"],
   engineers:["工程師人數","人"], queueMax:["每台預約上限","批"],
@@ -460,15 +460,21 @@ function normalizeCap(){
     P.cap[i] = c.join("");
   }
 }
-// 機台速度倍率（多 site 或新機台測得快）：1.0 = 標準，2.0 = 快一倍
+// 機台速度 ＝ 等效 site 數（機台能力的綜合倍率）。
+// 測試時間內的產出 ＝ 速度 × 單 site 產出，所以速度 8 的機台跑同一批只要 1/8 的時間。
 function normalizeSpeed(){
   if (!Array.isArray(P.speed)) P.speed = [];
   const n = Math.max(1, Math.round(P.machines));
   P.speed.length = n;
   for (let i = 0; i < n; i++){
     const v = +P.speed[i];
-    P.speed[i] = Number.isFinite(v) && v > 0 ? Math.min(10, Math.max(0.1, v)) : 1;
+    P.speed[i] = Number.isFinite(v) && v > 0 ? Math.min(64, Math.max(0.1, v)) : 1;
   }
+}
+// 交期是在還不知道會上哪台機時報的，用機隊平均速度當基準
+function fleetSpeed(){
+  const a = P.speed && P.speed.length ? P.speed : [1];
+  return a.reduce((x,y) => x + y, 0) / a.length;
 }
 function canRun(m, pkg){ return (P.cap[m.id] || "").includes(pkg); }
 function machinesFor(pkg){ return S.machines.filter(m => canRun(m, pkg)); }
@@ -530,7 +536,7 @@ function newLot(arrive){
     : null;
   // 預估工時：T1 加 30% retest 餘裕，再加一次換 Kit
   // （小批的測試時間可能比一次換 Kit 還短，不算進去的話小批天生就會遲交）
-  const est = qty * tpu / 60 * 1.3 + P.setupPkg;
+  const est = qty * tpu / 60 / fleetSpeed() * 1.3 + P.setupPkg;
   // 寬鬆倍數一律抽，換報價規則時亂數流才不會錯開，不同規則才比得起來
   const slack = hot ? rf(P.hotSlackMin,P.hotSlackMax) : rf(P.dueSlackMin,P.dueSlackMax);
   const hotF = hot ? P.dueHotFactor : 1;
@@ -995,7 +1001,7 @@ function render(){
         <div class="mid">
           <div class="mh"><b>${m.name}</b>${m.total ? `<span style="font-size:11px;color:var(--dim)">${Math.round(pct)}%</span>` : ""}<span class="st ${stateCls}">${STATE_LABEL[stateCls]}</span></div>
           <div class="cfg">Kit <span class="tag pkg${m.kit}">${m.kit}</span> 程式 <span class="prog">${m.prog}</span>
-            <span class="cap">${m.speed !== 1 ? `<b style="color:${m.speed>1?"var(--run)":"var(--setup)"}">×${m.speed}</b> · ` : ""}可測 ${(P.cap[m.id]||"").split("").join("·")}</span></div>
+            <span class="cap"><b style="color:${m.speed>=fleetSpeed()?"var(--run)":"var(--setup)"}">×${m.speed}</b><span style="opacity:.6"> (${m.speed} site)</span> · 可測 ${(P.cap[m.id]||"").split("").join("·")}</span></div>
         </div>
       </div>
       <div class="job">${job}</div>
@@ -1041,7 +1047,9 @@ const A = { mode:"manual", policy:"edd", queueDepth:1, preempt:true,
             wDue:1, wSetup:1, wSpt:0.5, wHot:3, wSpeed:1, days:20, seed:1 };
 
 // 這批貨在機台上的預估佔機時間（T1 + retest 餘裕）
-function estMin(lot){ return Math.max(1, Math.ceil(lot.qty * lot.tpu / 60 * 1.3)); }
+function estMin(lot){
+  return Math.max(1, Math.ceil(lot.qty * lot.tpu / 60 / fleetSpeed() * 1.3));
+}
 // 餘裕：現在接這批，離交期還剩多少緩衝（負值＝已經來不及）
 function slackMin(lot){ return lot.due - S.t - estMin(lot); }
 
@@ -1050,7 +1058,7 @@ function compositeScore(lot, m){
        + A.wHot   * (lot.hot ? 1 : 0)
        - A.wSetup * (tailCost(m, lot) / 60)
        - A.wSpt   * (estMin(lot) / 60)
-       + A.wSpeed * ((m.speed - 1) * estMin(lot) / 60);   // 放這台能省下的工時
+       + A.wSpeed * ((1 - fleetSpeed()/m.speed) * estMin(lot) / 60);  // 放這台能省下的工時
 }
 const POLICIES = [
   { id:"fifo",  name:"FIFO 到貨順序",     desc:"誰先到誰先做。最單純的基準線，完全不看交期與改機。",
@@ -1065,7 +1073,7 @@ const POLICIES = [
     score:(l, m) => -tailCost(m, l) * 1000 - l.due },
   { id:"speed", name:"Speed-aware 大批給快機",
     desc:"用「這批放這台能省多少分鐘」評分：快機優先接大批、慢機接小批，同分再比交期。",
-    score:(l, m) => (m.speed - 1) * estMin(l) - l.due / 1000 },
+    score:(l, m) => (1 - fleetSpeed()/m.speed) * estMin(l) - l.due / 1000 },
   { id:"comp",  name:"Composite 加權",     desc:"交期緊迫度、改機成本、批量大小、HOT 四個因子加權評分，權重可調。",
     score:(l, m) => compositeScore(l, m) }
 ];
@@ -1548,7 +1556,7 @@ function buildCapUI(){
        <th>速度×</th></tr>`
     + P.cap.map((c,i) => `<tr><td>T${i+1}</td>`
         + PKGS.map(k => `<td><input type="checkbox" data-cap="${i}:${k}" ${c.includes(k)?"checked":""}></td>`).join("")
-        + `<td><input type="number" data-spd="${i}" value="${P.speed[i]}" step="0.1" min="0.1" max="10"
+        + `<td><input type="number" data-spd="${i}" value="${P.speed[i]}" step="0.5" min="0.1" max="64"
               style="width:56px;background:var(--panel2);color:var(--txt);border:1px solid var(--line);
                      border-radius:5px;padding:2px 5px;text-align:right;font-family:inherit"></td>`
         + `</tr>`).join("")
@@ -1556,7 +1564,7 @@ function buildCapUI(){
   $("#capTable").querySelectorAll("[data-spd]").forEach(el => {
     el.onchange = () => {
       const i = +el.dataset.spd, v = +el.value;
-      P.speed[i] = Number.isFinite(v) && v > 0 ? Math.min(10, Math.max(0.1, v)) : 1;
+      P.speed[i] = Number.isFinite(v) && v > 0 ? Math.min(64, Math.max(0.1, v)) : 1;
       el.value = P.speed[i];
       if (S.machines[i]) S.machines[i].speed = P.speed[i];
       render();
