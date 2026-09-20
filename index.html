@@ -131,6 +131,8 @@
   .arow > label{display:flex;align-items:center;gap:5px;color:var(--dim)}
   .arow input[type=number]{width:64px;background:var(--panel2);color:var(--txt);
     border:1px solid var(--line);border-radius:5px;padding:3px 6px;font-family:inherit;text-align:right}
+  .arow input[type=text]{width:118px;background:var(--panel2);color:var(--txt);
+    border:1px solid var(--line);border-radius:5px;padding:3px 6px;font-family:inherit}
   .arow input[type=range]{width:110px;accent-color:#1f6feb}
   .wv{font-variant-numeric:tabular-nums;color:var(--txt);min-width:26px;display:inline-block}
   .adesc{color:var(--dim);font-size:11px;line-height:1.6}
@@ -325,6 +327,18 @@
           </div>
           <div id="benchTable"></div>
           <div id="benchChart"></div>
+
+          <div class="arow" style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+            <span style="color:var(--dim)">人機比跑分</span>
+            <label>機台數 <input type="text" id="ratioM" value="5,10,25,50"></label>
+            <label>人機比 1: <input type="text" id="ratioR" value="1,2,3,5,10,25"></label>
+            <label>天數 <input type="number" id="ratioDays" value="10" min="1" max="60"></label>
+            <button id="runRatio" class="go">▶ 跑人機比比較</button>
+            <span id="ratioStatus"></span>
+          </div>
+          <div class="adesc">一位工程師顧幾台機。到貨量會跟著機台數等比例放大（每台機的負載維持一樣），所以不同規模的產線可以直接對比。</div>
+          <div id="ratioTable"></div>
+          <div id="ratioChart"></div>
         </div>
       </details>
     </div>
@@ -650,7 +664,7 @@ function stepMinute(){
     let hots = 0;
     for (let i=0;i<n;i++){ const l = newLot(S.t); S.lots.push(l); if (l.hot) hots++; }
     log("客戶到貨 "+n+" 批"+(hots ? "（其中 "+hots+" 批 HOT 優先批）" : ""));
-    S.nextArrival = S.t + Math.max(10, Math.round(P.arrivalEvery * rf(0.6,1.4)));
+    S.nextArrival = S.t + Math.max(1, Math.round(P.arrivalEvery * rf(0.6,1.4)));
   }
   // 先跑當機判定，再統一配置工程師，最後才推進各機台這一分鐘
   for (const m of S.machines){
@@ -1154,6 +1168,134 @@ function showBench(acc, days){
   drawChart(rows, days);
 }
 
+/* ---------- 人機比跑分：一位工程師顧幾台機 ---------- */
+const parseList = (str, lo, hi) => [...new Set(String(str).split(/[,，\s]+/)
+  .map(x => Math.round(+x)).filter(n => Number.isFinite(n) && n >= lo && n <= hi))].sort((a,b) => a-b);
+
+function runRatioDay(M, E, baseM, baseEvery, seed, baseInit = P.initialLots){
+  P.machines = M; P.engineers = E;
+  // 到貨量與開局在製都隨規模等比例，每台機的負載才一致
+  const k = M / baseM;
+  P.arrivalEvery = Math.max(0.5, baseEvery / k);
+  P.initialLots = Math.max(1, Math.round(baseInit * k));
+  normalizeCap();
+  const keepS = S, keepRng = rng, keepSilent = SILENT;
+  SILENT = true;
+  init(seed);
+  for (let i = 0; i < DAY; i++){ stepMinute(); autoDispatch(); }
+  finalizePenalty();
+  const wait = S.machines.reduce((a,m) => a + m.wait, 0);
+  const r = { score:score(), good:S.good, util:utilization(), wait,
+              late:S.lateDone + S.missed, setup:S.machines.reduce((a,m) => a + m.setup, 0) };
+  S = keepS; rng = keepRng; SILENT = keepSilent;
+  return r;
+}
+function runRatioBench(){
+  const Ms = parseList($("#ratioM").value, 1, 200);
+  const Rs = parseList($("#ratioR").value, 1, 200);
+  const days = Math.max(1, Math.min(60, +$("#ratioDays").value || 10));
+  if (!Ms.length || !Rs.length){ $("#ratioStatus").textContent = "請填機台數與人機比"; return; }
+  const snapshot = JSON.parse(JSON.stringify(P));
+  const baseM = P.machines, baseEvery = P.arrivalEvery, baseInit = P.initialLots;
+  const cells = [];
+  for (const M of Ms){
+    const seen = new Set();
+    for (const R of Rs){
+      const E = Math.max(1, Math.min(M, Math.round(M / R)));
+      if (seen.has(E)) continue;              // 四捨五入後重複的組合只跑一次
+      seen.add(E);
+      cells.push({ M, E, R, ratio: M / E, runs: [] });
+    }
+  }
+  const jobs = [];
+  cells.forEach((c, ci) => { for (let sd = 1; sd <= days; sd++) jobs.push([ci, sd]); });
+  let i = 0;
+  $("#runRatio").disabled = true;
+  const step = () => {
+    const t0 = performance.now();
+    while (i < jobs.length && performance.now() - t0 < 80){
+      const [ci, sd] = jobs[i++];
+      const c = cells[ci];
+      c.runs.push(runRatioDay(c.M, c.E, baseM, baseEvery, sd, baseInit));
+    }
+    $("#ratioStatus").textContent = `跑分中… ${i}/${jobs.length}`;
+    if (i < jobs.length){ setTimeout(step, 0); return; }
+    Object.assign(P, snapshot); normalizeCap();   // 還原設定，畫面上的那局不受影響
+    applyTypes(); buildParams(); buildCapUI(); reset();
+    $("#runRatio").disabled = false;
+    $("#ratioStatus").textContent = `完成：${cells.length} 種組合 × ${days} 天`;
+    showRatio(cells, Ms, Rs, days);
+  };
+  setTimeout(step, 0);
+}
+function showRatio(cells, Ms, Rs, days){
+  for (const c of cells){
+    const m = k => c.runs.reduce((a,x) => a + x[k], 0) / c.runs.length;
+    c.goodPer = m("good") / c.M;                       // 每台機良品，規模之間才可比
+    c.scorePer = m("score") / c.M;
+    c.util = m("util");
+    c.waitPct = m("wait") / (c.M * DAY) * 100;
+    c.late = m("late");
+  }
+  const rows = [...cells].sort((a,b) => a.M - b.M || b.ratio - a.ratio);
+  $("#ratioTable").innerHTML =
+    `<table><tr><th>機台數</th><th>工程師</th><th>人機比</th><th>每台機良品</th>
+       <th>稼動率</th><th>等工程師占比</th><th>逾期批/天</th><th>每台機分數</th></tr>`
+    + rows.map(r => {
+        const weak = r.waitPct >= 10;
+        return `<tr${weak ? ` style="color:var(--down)"` : ""}>
+          <td>${r.M}</td><td>${r.E}</td><td>1 : ${r.ratio.toFixed(1)}</td>
+          <td>${nf(r.goodPer)}</td><td>${r.util.toFixed(1)}%</td>
+          <td>${r.waitPct.toFixed(1)}%</td><td>${r.late.toFixed(2)}</td>
+          <td>${nf(r.scorePer)}</td></tr>`; }).join("")
+    + `</table>`;
+  drawRatioChart(cells, Ms, Rs);
+}
+function drawRatioChart(cells, Ms, Rs){
+  const W = 760, H = 250, padL = 58, padR = 14, padT = 12, padB = 30;
+  const cats = Rs;                                   // 橫軸用要求的人機比當類別，各規模才對得齊
+  const vals = cells.map(c => c.goodPer);
+  let lo = 0, hi = Math.max(...vals) * 1.08 || 1;
+  const x = i => padL + (cats.length === 1 ? 0 : i * (W - padL - padR) / (cats.length - 1));
+  const y = v => padT + (1 - (v - lo) / (hi - lo)) * (H - padT - padB);
+  const kfmt = v => Math.abs(v) >= 10000 ? Math.round(v/1000)+"k" : nf(v);
+  const grid = [0,1,2,3,4].map(i => { const v = lo + (hi-lo)*i/4;
+    return `<line x1="${padL}" x2="${W-padR}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}"
+        stroke="#2b3442" stroke-width="1"/>
+        <text x="${padL-8}" y="${(y(v)+3.5).toFixed(1)}" text-anchor="end" fill="#8b949e" font-size="10">${kfmt(v)}</text>`; }).join("");
+  const xt = cats.map((r,i) =>
+    `<text x="${x(i).toFixed(1)}" y="${H-12}" text-anchor="middle" fill="#8b949e" font-size="10">1:${r}</text>`).join("");
+  const lines = Ms.map((M, si) => {
+    const c = SERIES[si % SERIES.length];
+    const pts = cats.map((r,i) => {
+      const E = Math.max(1, Math.min(M, Math.round(M / r)));
+      const cell = cells.find(z => z.M === M && z.E === E);
+      return cell ? `${x(i).toFixed(1)},${y(cell.goodPer).toFixed(1)}` : null;
+    }).filter(Boolean);
+    return `<polyline points="${pts.join(" ")}" fill="none" stroke="${c}" stroke-width="2"
+             stroke-linejoin="round" stroke-linecap="round"/>`;
+  }).join("");
+  const dots = Ms.map((M, si) => {
+    const c = SERIES[si % SERIES.length];
+    return cats.map((r,i) => {
+      const E = Math.max(1, Math.min(M, Math.round(M / r)));
+      const cell = cells.find(z => z.M === M && z.E === E);
+      if (!cell) return "";
+      return `<circle cx="${x(i).toFixed(1)}" cy="${y(cell.goodPer).toFixed(1)}" r="4"
+        fill="${c}" stroke="#161b22" stroke-width="2">
+        <title>${M} 台 · ${cell.E} 人（實際 1:${cell.ratio.toFixed(1)}）
+每台機良品 ${nf(cell.goodPer)} · 稼動 ${cell.util.toFixed(1)}% · 等工程師 ${cell.waitPct.toFixed(1)}%</title></circle>`;
+    }).join("");
+  }).join("");
+  $("#ratioChart").innerHTML =
+    `<div class="legend">${Ms.map((M,si) =>
+        `<span><i style="background:${SERIES[si % SERIES.length]}"></i>${M} 台機</span>`).join("")}</div>
+     <div class="chartWrap"><svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block">
+       ${grid}${xt}${lines}${dots}
+     </svg></div>
+     <div class="adesc">縱軸＝每台機一天的良品顆數（規模之間可比），橫軸＝人機比（1 位工程師顧幾台機）。滑過圓點看該組合的稼動率與等工程師占比。</div>`;
+}
+
 /* 每日分數分佈：同一個種子 = 同一天的情境，各策略配對比較 */
 const SERIES = ["#3987e5","#d95926","#199e70","#c98500","#d55181","#008300"];
 const hidden = new Set();                  // 圖例點掉的策略
@@ -1582,6 +1724,7 @@ function buildAlgo(){
   $("#preSw").onchange  = e => A.preempt = e.target.checked;
   $("#daysIn").onchange = e => A.days = +e.target.value;
   $("#runBench").onclick = runBatch;
+  $("#runRatio").onclick = runRatioBench;
 }
 function buildDueRuleUI(){
   $("#dueRuleSel").innerHTML = DUE_RULES.map(r =>
