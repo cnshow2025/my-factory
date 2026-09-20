@@ -308,6 +308,7 @@
             <label>省改機 <input type="range" id="wSetup" min="0" max="3" step="0.1" value="1"><span class="wv" id="vSetup">1</span></label>
             <label>短批優先 <input type="range" id="wSpt" min="0" max="3" step="0.1" value="0.5"><span class="wv" id="vSpt">0.5</span></label>
             <label>HOT <input type="range" id="wHot" min="0" max="10" step="0.5" value="3"><span class="wv" id="vHot">3</span></label>
+            <label>大批給快機 <input type="range" id="wSpeed" min="0" max="3" step="0.1" value="1"><span class="wv" id="vSpeed">1</span></label>
           </div>
           <div class="arow">
             <span style="color:var(--dim)">自動派工行為</span>
@@ -356,7 +357,7 @@
           <button id="presetSave">💾 存成「我的工廠」</button>
         </div>
         <div class="adesc" id="presetDesc" style="margin-top:6px"></div>
-        <div class="capline" style="margin-top:12px">機台能力矩陣 — 勾選哪台機可以測哪種封裝。<b>取消勾選＝該機台不能生產該封裝</b>，派工、預約、改機、插單、整批移轉都會被擋下來，自動排程也不會派給它。</div>
+        <div class="capline" style="margin-top:12px">機台能力矩陣 — 勾選哪台機可以測哪種封裝。<b>取消勾選＝該機台不能生產該封裝</b>，派工、預約、改機、插單、整批移轉都會被擋下來，自動排程也不會派給它。最右邊的<b>速度×</b>是該機台的測試速度倍率（多 site 或新機台會比較快），<b>2.0 代表同一批只要一半時間</b>；「Speed-aware」策略會把大批優先派給快機。</div>
         <div id="capTable"></div>
         <div class="capline" id="capWarn" style="margin-top:6px"></div>
         <div id="params" style="margin-top:10px"></div>
@@ -459,6 +460,16 @@ function normalizeCap(){
     P.cap[i] = c.join("");
   }
 }
+// 機台速度倍率（多 site 或新機台測得快）：1.0 = 標準，2.0 = 快一倍
+function normalizeSpeed(){
+  if (!Array.isArray(P.speed)) P.speed = [];
+  const n = Math.max(1, Math.round(P.machines));
+  P.speed.length = n;
+  for (let i = 0; i < n; i++){
+    const v = +P.speed[i];
+    P.speed[i] = Number.isFinite(v) && v > 0 ? Math.min(10, Math.max(0.1, v)) : 1;
+  }
+}
 function canRun(m, pkg){ return (P.cap[m.id] || "").includes(pkg); }
 function machinesFor(pkg){ return S.machines.filter(m => canRun(m, pkg)); }
 function runnablePkgs(){ return PKGS.filter(pk => P.cap.some(c => c.includes(pk))); }
@@ -550,7 +561,7 @@ function newLot(arrive){
 function newMachine(i){
   const able = (P.cap[i] || PKGS.join("")).split("");
   return {
-    id:i, name:"T"+(i+1),
+    id:i, name:"T"+(i+1), speed:(P.speed && P.speed[i]) || 1,
     kit:able[i % able.length], prog:PROGS[i % PROGS.length],
     state:"IDLE", prevState:"IDLE", lot:null, phase:null,
     remain:0, total:0, target:null, queue:[], segs:[],
@@ -561,7 +572,7 @@ function newMachine(i){
 function init(seed){
   const sd = seed === undefined ? A.seed : seed;
   rng = mulberry32(sd);
-  applyTypes(); normalizeCap();
+  applyTypes(); normalizeCap(); normalizeSpeed();
   S = { seed:sd, t:0, running:false, speed:1, ended:false, seq:1, lots:[], machines:[],
         nextArrival:P.arrivalEvery, sel:null, log:[], good:0, lots_done:0, engBusy:0,
         goodScore:0, penalty:0, onTime:0, lateDone:0, missed:0, sortBy:"due" };
@@ -583,7 +594,10 @@ function setupCost(m, pkg, prog){
   if (m.prog !== prog) return P.setupProg;
   return 0;
 }
-function phaseMinutes(lot, qty){ return Math.max(1, Math.ceil(qty * lot.tpu / 60)); }
+// 標準速度下的工時；實際在某台機上要除以該機的速度倍率
+function phaseMinutes(lot, qty, m){
+  return Math.max(1, Math.ceil(qty * lot.tpu / 60 / ((m && m.speed) || 1)));
+}
 
 // 現批做完 → 自動接下一批預約（該改機就自動改機）
 function takeNext(m){
@@ -604,7 +618,7 @@ function startPhase(m, phase){
   const lot = m.lot;
   const qty = phase === "T1" ? lot.qty : lot.pending;
   m.phase = phase;
-  m.total = m.remain = phaseMinutes(lot, qty);
+  m.total = m.remain = phaseMinutes(lot, qty, m);
   m.state = "RUN";
   lot.state = phase;
   log(m.name+" 開始 "+phase+"："+lot.id+" "+nf(qty)+" 顆（約 "+m.total+" 分）");
@@ -944,9 +958,10 @@ function render(){
     if (canTake){
       const c = idleFree ? setupCost(m, sel.pkg, sel.prog) : tailCost(m, sel);
       const pre = idleFree ? "" : `排隊 #${m.queue.length+1} · `;
-      hint = c === 0 ? `<span class="hint free">${pre}免改機</span>`
-           : c === P.setupProg ? `<span class="hint">${pre}換程式 ${c} 分</span>`
-           : `<span class="hint pkg">${pre}換 Kit ${c} 分</span>`;
+      const t1 = `測 ${phaseMinutes(sel, sel.qty, m)} 分`;
+      hint = c === 0 ? `<span class="hint free">${pre}免改機 · ${t1}</span>`
+           : c === P.setupProg ? `<span class="hint">${pre}換程式 ${c} 分 · ${t1}</span>`
+           : `<span class="hint pkg">${pre}換 Kit ${c} 分 · ${t1}</span>`;
     }
     const pct = m.total ? (1 - m.remain/m.total)*100 : 0;
     let job = `<span style="color:var(--dim)">待命中 — 可派工或預先改機</span>`;
@@ -980,7 +995,7 @@ function render(){
         <div class="mid">
           <div class="mh"><b>${m.name}</b>${m.total ? `<span style="font-size:11px;color:var(--dim)">${Math.round(pct)}%</span>` : ""}<span class="st ${stateCls}">${STATE_LABEL[stateCls]}</span></div>
           <div class="cfg">Kit <span class="tag pkg${m.kit}">${m.kit}</span> 程式 <span class="prog">${m.prog}</span>
-            <span class="cap">可測 ${(P.cap[m.id]||"").split("").join("·")}</span></div>
+            <span class="cap">${m.speed !== 1 ? `<b style="color:${m.speed>1?"var(--run)":"var(--setup)"}">×${m.speed}</b> · ` : ""}可測 ${(P.cap[m.id]||"").split("").join("·")}</span></div>
         </div>
       </div>
       <div class="job">${job}</div>
@@ -1023,7 +1038,7 @@ function render(){
 
 /* ---------- 排程演算法 ---------- */
 const A = { mode:"manual", policy:"edd", queueDepth:1, preempt:true,
-            wDue:1, wSetup:1, wSpt:0.5, wHot:3, days:20, seed:1 };
+            wDue:1, wSetup:1, wSpt:0.5, wHot:3, wSpeed:1, days:20, seed:1 };
 
 // 這批貨在機台上的預估佔機時間（T1 + retest 餘裕）
 function estMin(lot){ return Math.max(1, Math.ceil(lot.qty * lot.tpu / 60 * 1.3)); }
@@ -1034,7 +1049,8 @@ function compositeScore(lot, m){
   return A.wDue   * (-slackMin(lot) / 60)
        + A.wHot   * (lot.hot ? 1 : 0)
        - A.wSetup * (tailCost(m, lot) / 60)
-       - A.wSpt   * (estMin(lot) / 60);
+       - A.wSpt   * (estMin(lot) / 60)
+       + A.wSpeed * ((m.speed - 1) * estMin(lot) / 60);   // 放這台能省下的工時
 }
 const POLICIES = [
   { id:"fifo",  name:"FIFO 到貨順序",     desc:"誰先到誰先做。最單純的基準線，完全不看交期與改機。",
@@ -1047,6 +1063,9 @@ const POLICIES = [
     score:(l) => (l.hot ? 1e7 : 0) - l.due },
   { id:"setup", name:"Setup-aware 省改機", desc:"優先挑不用改機的批串在同一台機上，同成本時再比交期。",
     score:(l, m) => -tailCost(m, l) * 1000 - l.due },
+  { id:"speed", name:"Speed-aware 大批給快機",
+    desc:"用「這批放這台能省多少分鐘」評分：快機優先接大批、慢機接小批，同分再比交期。",
+    score:(l, m) => (m.speed - 1) * estMin(l) - l.due / 1000 },
   { id:"comp",  name:"Composite 加權",     desc:"交期緊迫度、改機成本、批量大小、HOT 四個因子加權評分，權重可調。",
     score:(l, m) => compositeScore(l, m) }
 ];
@@ -1185,7 +1204,7 @@ function runRatioDay(M, E, baseM, baseEvery, seed, baseInit = P.initialLots){
   const k = M / baseM;
   P.arrivalEvery = Math.max(0.5, baseEvery / k);
   P.initialLots = Math.max(1, Math.round(baseInit * k));
-  normalizeCap();
+  normalizeCap(); normalizeSpeed();
   const keepS = S, keepRng = rng, keepSilent = SILENT;
   SILENT = true;
   init(seed);
@@ -1506,7 +1525,8 @@ function applyPreset(id){
   const pre = PRESETS.find(x => x.id === id);
   if (!pre) return;
   Object.assign(P, JSON.parse(JSON.stringify(pre.P)));
-  applyTypes(); normalizeCap(); buildParams(); buildCapUI(); buildDueRuleUI(); syncRules();
+  applyTypes(); normalizeCap(); normalizeSpeed();
+  buildParams(); buildCapUI(); buildDueRuleUI(); syncRules();
   $("#presetDesc").textContent = pre.desc;
   reset();
 }
@@ -1522,14 +1542,26 @@ function savePreset(){
 }
 
 function buildCapUI(){
-  normalizeCap();
-  const n = P.cap.length;
+  normalizeCap(); normalizeSpeed();
   $("#capTable").innerHTML =
-    `<table><tr><th>機台</th>${PKGS.map(k => `<th><span class="tag pkg${k}">${k}</span></th>`).join("")}</tr>`
+    `<table><tr><th>機台</th>${PKGS.map(k => `<th><span class="tag pkg${k}">${k}</span></th>`).join("")}
+       <th>速度×</th></tr>`
     + P.cap.map((c,i) => `<tr><td>T${i+1}</td>`
         + PKGS.map(k => `<td><input type="checkbox" data-cap="${i}:${k}" ${c.includes(k)?"checked":""}></td>`).join("")
+        + `<td><input type="number" data-spd="${i}" value="${P.speed[i]}" step="0.1" min="0.1" max="10"
+              style="width:56px;background:var(--panel2);color:var(--txt);border:1px solid var(--line);
+                     border-radius:5px;padding:2px 5px;text-align:right;font-family:inherit"></td>`
         + `</tr>`).join("")
     + `</table>`;
+  $("#capTable").querySelectorAll("[data-spd]").forEach(el => {
+    el.onchange = () => {
+      const i = +el.dataset.spd, v = +el.value;
+      P.speed[i] = Number.isFinite(v) && v > 0 ? Math.min(10, Math.max(0.1, v)) : 1;
+      el.value = P.speed[i];
+      if (S.machines[i]) S.machines[i].speed = P.speed[i];
+      render();
+    };
+  });
   $("#capTable").querySelectorAll("[data-cap]").forEach(el => {
     el.onchange = () => {
       const [i, k] = el.dataset.cap.split(":");
@@ -1728,7 +1760,7 @@ function buildAlgo(){
     $(id).oninput = e => { A[key] = +e.target.value; $(out).textContent = e.target.value; };
   };
   w("#wDue","wDue","#vDue"); w("#wSetup","wSetup","#vSetup");
-  w("#wSpt","wSpt","#vSpt"); w("#wHot","wHot","#vHot");
+  w("#wSpt","wSpt","#vSpt"); w("#wHot","wHot","#vHot"); w("#wSpeed","wSpeed","#vSpeed");
   $("#qDepth").onchange = e => A.queueDepth = +e.target.value;
   $("#preSw").onchange  = e => A.preempt = e.target.checked;
   $("#daysIn").onchange = e => A.days = +e.target.value;
@@ -1751,7 +1783,7 @@ function buildPresetUI(){
   $("#presetApply").onclick = () => applyPreset($("#presetSel").value);
   $("#presetSave").onclick = savePreset;
 }
-loadSavedPreset(); applyTypes(); normalizeCap();
+loadSavedPreset(); applyTypes(); normalizeCap(); normalizeSpeed();
 buildParams(); buildAlgo(); buildPresetUI(); buildDueRuleUI(); buildCapUI(); syncRules(); init();
 </script>
 </body>
