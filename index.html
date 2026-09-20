@@ -254,6 +254,7 @@
     <button data-spd="2" class="spd">2x</button>
     <button data-spd="4" class="spd">4x</button>
     <button id="btnReset">↻ 重新開始</button>
+    <button id="btnWip" class="hideMobile" title="載入現場 WIP，算這批貨要多久做完">📥 載入貨批</button>
   </div>
 </header>
 <div class="dayline"><div id="dayBar"></div></div>
@@ -289,8 +290,8 @@
     <div id="lines"></div>
 
     <div class="panel hideMobile" style="margin-top:12px">
-      <details id="wipPanelDetails">
-        <summary>📥 實際貨批分析（載入現場 WIP，比較清空時間）</summary>
+      <details id="wipPanelDetails" open>
+        <summary>📥 實際貨批分析 — 載入現場 WIP，算這批貨要多久做完</summary>
         <div class="arow" style="margin-top:10px">
           <button id="wipPick" class="go">選擇檔案（.xlsx）</button>
           <input type="file" id="wipFile" accept=".xlsx" style="display:none">
@@ -2275,6 +2276,12 @@ function buildAlgo(){
   bindWipUI();
 }
 function bindWipUI(){
+  // 機台卡片很長，分析面板會被推到很下面，所以最上面的控制列放一顆直接跳過去的按鈕
+  $("#btnWip").onclick = () => {
+    const d = $("#wipPanelDetails");
+    d.open = true;
+    d.scrollIntoView({ behavior:"smooth", block:"start" });
+  };
   $("#wipPick").onclick = () => $("#wipFile").click();
   $("#wipFile").onchange = e => { const f = e.target.files[0]; if (f) loadWipFile(f); e.target.value = ""; };
   $("#wipClear").onclick = () => {
