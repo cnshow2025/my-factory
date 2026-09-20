@@ -1,0 +1,141 @@
+<meta charset="utf-8">
+<style>
+ body{margin:0;background:#fff;font-family:"Noto Sans CJK TC","Microsoft JhengHei","PingFang TC",sans-serif}
+ .c{background:#fff;padding:14px 16px 10px;box-sizing:border-box}
+ .ct{font-size:15px;font-weight:700;color:#1E2761;margin:0 0 10px}
+ .lg{display:flex;gap:16px;font-size:12px;color:#16213E;margin:8px 0 0 4px}
+ .lg span{display:flex;align-items:center;gap:6px}
+ .lg i{width:16px;height:3px;border-radius:2px}
+ text{font-family:inherit}
+</style>
+<script>
+const TEAL="#1C7293", NAVY="#1E2761", GOOD="#0F7B6C", WARN="#C2410C", BAD="#9B1C1C",
+      AMBER="#E0A458", INK="#16213E", MUTED="#5A6785", GRID="#E3E8F0";
+const fmt = (v,d) => (d!=null? v.toFixed(d) : (Math.abs(v)>=1000? v.toLocaleString() : (Math.round(v*10)/10).toString()));
+
+function hbar(el,{title,labels,values,color=TEAL,unit="",max=null,pl=210,dec=null}){
+  const PL=pl;
+  const W=el.dataset.w*1, H=el.dataset.h*1, PR=78, PT=8, PB=22;
+  const m = max ?? Math.max(...values)*1.12, mn = Math.min(0,...values)*1.1;
+  const bw=(H-PT-PB)/labels.length, x=v=>PL+(v-mn)/(m-mn)*(W-PL-PR);
+  let s=`<svg width="${W}" height="${H}">`;
+  const zero=x(0);
+  for(let i=0;i<labels.length;i++){
+    const y=PT+i*bw, v=values[i], x0=Math.min(zero,x(v)), w=Math.abs(x(v)-zero);
+    s+=`<rect x="${x0}" y="${y+bw*0.16}" width="${w}" height="${bw*0.68}" rx="3" fill="${v<0?WARN:color}"/>`;
+    s+=`<text x="${PL-12}" y="${y+bw/2+5}" text-anchor="end" font-size="13" fill="${INK}">${labels[i]}</text>`;
+    s+=`<text x="${(v<0?zero+10:x0+w+8)}" y="${y+bw/2+5}" text-anchor="start" font-size="13" font-weight="700" fill="${v<0?WARN:INK}">${fmt(v,dec)}${unit}</text>`;
+  }
+  s+=`<line x1="${zero}" y1="${PT}" x2="${zero}" y2="${H-PB}" stroke="${GRID}" stroke-width="1.5"/></svg>`;
+  el.innerHTML=(title?`<div class="ct">${title}</div>`:"")+s;
+}
+function vbar(el,{title,labels,values,color=TEAL,unit="",series2=null,names=null,min=0,max=null,dec=null}){
+  const W=el.dataset.w*1, H=el.dataset.h*1, PL=64, PR=14, PT=22, PB=(series2?58:44);
+  const all=series2?[...values,...series2]:values;
+  const m=max ?? Math.max(...all)*1.18;
+  const gw=(W-PL-PR)/labels.length, n=series2?2:1;
+  const y=v=>H-PB-(v-min)/(m-min)*(H-PT-PB);
+  let s=`<svg width="${W}" height="${H}">`;
+  for(let t=0;t<=4;t++){const v=min+(m-min)*t/4;
+    s+=`<line x1="${PL}" x2="${W-PR}" y1="${y(v)}" y2="${y(v)}" stroke="${GRID}"/>`
+      +`<text x="${PL-10}" y="${y(v)+4}" text-anchor="end" font-size="11" fill="${MUTED}">${fmt(v)}</text>`;}
+  labels.forEach((lb,i)=>{
+    const bx=PL+i*gw, bw=gw*0.62/n, off=(gw-bw*n)/2;
+    [values, series2].filter(Boolean).forEach((arr,k)=>{
+      const v=arr[i], X=bx+off+k*bw;
+      s+=`<rect x="${X}" y="${y(v)}" width="${bw}" height="${H-PB-y(v)}" rx="3" fill="${k?AMBER:color}"/>`
+        +`<text x="${X+bw/2}" y="${y(v)-7}" text-anchor="middle" font-size="12" font-weight="700" fill="${INK}">${fmt(v,dec)}</text>`;
+    });
+    lb.split("\n").forEach((t,j)=>{ s+=`<text x="${bx+gw/2}" y="${H-PB+17+j*14}" text-anchor="middle" font-size="12" fill="${INK}">${t}</text>`; });
+  });
+  s+=`</svg>`;
+  let lg="";
+  if(series2&&names) lg=`<div class="lg"><span><i style="background:${color}"></i>${names[0]}</span><span><i style="background:${AMBER}"></i>${names[1]}</span></div>`;
+  el.innerHTML=(title?`<div class="ct">${title}</div>`:"")+s+lg;
+}
+function line(el,{title,labels,series,unit="",min=null,max=null,colors=[TEAL,NAVY,AMBER],pr=22,dec=null}){
+  const W=el.dataset.w*1, H=el.dataset.h*1, PL=62, PR=pr, PT=24, PB=(series.length>1?56:42);
+  const all=series.flatMap(s=>s.values);
+  const m=max ?? Math.max(...all)*1.10, mn=min ?? Math.min(...all)*0.88;
+  const x=i=>PL+i*(W-PL-PR)/(labels.length-1), y=v=>H-PB-(v-mn)/(m-mn)*(H-PT-PB);
+  let s=`<svg width="${W}" height="${H}">`;
+  for(let t=0;t<=4;t++){const v=mn+(m-mn)*t/4;
+    s+=`<line x1="${PL}" x2="${W-PR}" y1="${y(v)}" y2="${y(v)}" stroke="${GRID}"/>`
+      +`<text x="${PL-10}" y="${y(v)+4}" text-anchor="end" font-size="11" fill="${MUTED}">${fmt(v)}</text>`;}
+  labels.forEach((lb,i)=>{ s+=`<text x="${x(i)}" y="${H-PB+18}" text-anchor="middle" font-size="12" fill="${INK}">${lb}</text>`; });
+  series.forEach((se,k)=>{
+    const c=colors[k%colors.length];
+    s+=`<polyline points="${se.values.map((v,i)=>x(i)+','+y(v)).join(' ')}" fill="none" stroke="${c}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>`;
+    se.values.forEach((v,i)=>{ s+=`<circle cx="${x(i)}" cy="${y(v)}" r="5.5" fill="${c}" stroke="#fff" stroke-width="2"/>`;
+      if(series.length===1) s+=`<text x="${x(i)}" y="${y(v)-13}" text-anchor="middle" font-size="12" font-weight="700" fill="${INK}">${fmt(v,dec)}${unit}</text>`; });
+  });
+  s+=`</svg>`;
+  let lg="";
+  if(series.length>1) lg=`<div class="lg">${series.map((se,k)=>`<span><i style="background:${colors[k%colors.length]}"></i>${se.name}</span>`).join("")}</div>`;
+  el.innerHTML=(title?`<div class="ct">${title}</div>`:"")+s+lg;
+}
+function donut(el,{title,labels,values,colors}){
+  const W=el.dataset.w*1, H=el.dataset.h*1, R=Math.min(W*0.52,H-70)/2, CX=R+24, CY=(H-40)/2+18, IR=R*0.56;
+  const tot=values.reduce((a,b)=>a+b,0); let a0=-Math.PI/2;
+  let s=`<svg width="${W}" height="${H}">`;
+  values.forEach((v,i)=>{
+    const a1=a0+v/tot*Math.PI*2, big=(a1-a0)>Math.PI?1:0;
+    const p=(r,a)=>[CX+r*Math.cos(a),CY+r*Math.sin(a)];
+    const [x1,y1]=p(R,a0),[x2,y2]=p(R,a1),[x3,y3]=p(IR,a1),[x4,y4]=p(IR,a0);
+    s+=`<path d="M${x1} ${y1}A${R} ${R} 0 ${big} 1 ${x2} ${y2}L${x3} ${y3}A${IR} ${IR} 0 ${big} 0 ${x4} ${y4}Z" fill="${colors[i]}" stroke="#fff" stroke-width="2"/>`;
+    const [lx,ly]=p((R+IR)/2,(a0+a1)/2);
+    if(v/tot>0.05) s+=`<text x="${lx}" y="${ly+5}" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">${v}%</text>`;
+    a0=a1;
+  });
+  labels.forEach((lb,i)=>{
+    const ly=CY-R+i*26+6;
+    s+=`<rect x="${CX+R+26}" y="${ly-11}" width="14" height="14" rx="3" fill="${colors[i]}"/>`
+      +`<text x="${CX+R+48}" y="${ly}" font-size="13" fill="${INK}">${lb} ${values[i]}%</text>`;
+  });
+  s+=`</svg>`;
+  el.innerHTML=(title?`<div class="ct">${title}</div>`:"")+s;
+}
+</script>
+<div id="root"></div>
+<script>
+const R = document.getElementById("root");
+function mk(id,w,h){ const d=document.createElement("div"); d.className="c"; d.id=id;
+  d.dataset.w=w-32; d.dataset.h=h-52; d.style.width=w+"px"; R.appendChild(d); return d; }
+
+hbar(mk("c_factors",1100,430),{title:"單一因素造成的每日良品差距（萬顆）",
+ labels:["當機率（減半）","換程式時間（30→15 分）","機台專用化（現況 vs 完全彈性）","派工時機（做完才派 vs 押 3 批）","排程法則（最佳 vs 最差）","工程師人力（10 人 vs 5 人）"],
+ values:[-1.7,3.0,5.4,27.7,50.2,55.6], pl:300, dec:1});
+
+vbar(mk("c_depth",560,400),{title:"派工時機：每日良品（萬顆）",
+ labels:["做完\n才派","預先押\n1 批","預先押\n2 批","預先押\n3 批"], values:[145.4,131.5,124.3,117.7], min:100, max:155, dec:1});
+vbar(mk("c_late",560,400),{title:"派工時機：每日逾期批數",
+ labels:["做完\n才派","預先押\n1 批","預先押\n2 批","預先押\n3 批"], values:[5,39.9,77.3,105.8], color:BAD, max:118, dec:1});
+
+hbar(mk("c_policy",660,420),{title:"排程法則：每日良品（萬顆）",
+ labels:["最短工時 SPT","最早交期 EDD","急件優先→交期","到貨順序 FIFO","加權綜合","大批給快機","省改機優先"],
+ values:[95.2,108.4,116.6,119.5,130.9,131.9,145.4], color:GOOD, pl:170, dec:1});
+
+line(mk("c_eng",560,400),{title:"工程師人數 vs 機台停等比例",
+ labels:["4 人","5 人","6 人","7 人","8 人","10 人","13 人","17 人"],
+ series:[{name:"等工程師占比",values:[59.0,45.5,31.8,22.4,14.4,3.7,0.4,0.0]}], unit:"%", min:0, colors:[BAD]});
+line(mk("c_ratio",640,400),{title:"人機比：每台機產出（各規模以 1:1 為 100%）",
+ labels:["1:1","1:2","1:3","1:4","1:6","1:8"],
+ series:[{name:"10 台機",values:[100,102.6,106.2,106.2,82.4,38.5]},
+         {name:"25 台機",values:[100,99.3,95.4,89.8,43.8,27.3]},
+         {name:"50 台機",values:[100,99.4,99.3,96.4,48.9,27.7]}], min:20, max:115});
+
+vbar(mk("c_ded",560,400),{title:"機台專用化的效果",
+ labels:["完全彈性","現況\n5 彈性+20 專用","完全專用"], values:[86,39,0], series2:[402,343,273],
+ names:["每日換 Kit 次數","每台每日改機分鐘"], color:WARN, max:460});
+vbar(mk("c_lever",640,400),{title:"改善槓桿：每日良品（萬顆）",
+ labels:["現況","換程式\n30→15","換 Kit\n60→30","當機率\n減半","全部\n專用化","專用化+\n換程式減半"],
+ values:[145.4,148.4,145.8,143.7,143.5,149.1], color:GOOD, min:135, max:154, dec:1});
+
+line(mk("c_cum",1100,430),{title:"累積效益路徑：每日良品（萬顆）",
+ labels:["A 典型現行做法","B ＋省改機排程","C ＋取消預先派工","D ＋工程師補至 10 人","E ＋換程式減半"],
+ series:[{name:"每日良品",values:[77.0,117.8,138.5,145.4,148.4]}], min:60, colors:[GOOD], pr:110, dec:1});
+
+donut(mk("c_time",560,400),{title:"現況：機台時間都花在哪裡",
+ labels:["測試","改機","維修","等工程師","閒置"], values:[46.7,23.8,11.2,3.7,14.6],
+ colors:[GOOD,WARN,BAD,AMBER,"#C7CEDB"]});
+</script>

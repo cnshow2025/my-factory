@@ -1,0 +1,495 @@
+{
+ "base": {
+  "good": 1454382,
+  "util": 46.7,
+  "late": 5,
+  "kit": 39,
+  "prog": 213,
+  "setupPerM": 343,
+  "downPerM": 161,
+  "waitPct": 3.7,
+  "score": 1558913
+ },
+ "policies": {
+  "FIFO 到貨順序": {
+   "good": 1194867,
+   "util": 44.6,
+   "late": 89.8,
+   "kit": 49,
+   "prog": 234,
+   "setupPerM": 390,
+   "downPerM": 164,
+   "waitPct": 11.4,
+   "score": -647505
+  },
+  "EDD 最早交期": {
+   "good": 1083834,
+   "util": 40.4,
+   "late": 28.8,
+   "kit": 61,
+   "prog": 222,
+   "setupPerM": 404,
+   "downPerM": 162,
+   "waitPct": 15.2,
+   "score": 533292
+  },
+  "SPT 最短工時": {
+   "good": 952290,
+   "util": 37.1,
+   "late": 52.3,
+   "kit": 64,
+   "prog": 224,
+   "setupPerM": 409,
+   "downPerM": 162,
+   "waitPct": 19.5,
+   "score": -169177
+  },
+  "HOT 優先 → EDD": {
+   "good": 1166187,
+   "util": 41.7,
+   "late": 23.1,
+   "kit": 60,
+   "prog": 228,
+   "setupPerM": 407,
+   "downPerM": 159,
+   "waitPct": 13.6,
+   "score": 838756
+  },
+  "Setup-aware 省改機": {
+   "good": 1454382,
+   "util": 46.7,
+   "late": 5,
+   "kit": 39,
+   "prog": 213,
+   "setupPerM": 343,
+   "downPerM": 161,
+   "waitPct": 3.7,
+   "score": 1558913
+  },
+  "Speed-aware 大批給快機": {
+   "good": 1319032,
+   "util": 39.9,
+   "late": 37.4,
+   "kit": 41,
+   "prog": 255,
+   "setupPerM": 395,
+   "downPerM": 162,
+   "waitPct": 13.7,
+   "score": 673916
+  },
+  "Composite 加權": {
+   "good": 1308754,
+   "util": 44.8,
+   "late": 8.8,
+   "kit": 51,
+   "prog": 229,
+   "setupPerM": 390,
+   "downPerM": 161,
+   "waitPct": 10.1,
+   "score": 1311451
+  }
+ },
+ "depth": {
+  "深度0": {
+   "good": 1454382,
+   "util": 46.7,
+   "late": 5,
+   "kit": 39,
+   "prog": 213,
+   "setupPerM": 343,
+   "downPerM": 161,
+   "waitPct": 3.7,
+   "score": 1558913
+  },
+  "深度1": {
+   "good": 1315402,
+   "util": 46.7,
+   "late": 39.9,
+   "kit": 47,
+   "prog": 224,
+   "setupPerM": 374,
+   "downPerM": 162,
+   "waitPct": 7.1,
+   "score": 610021
+  },
+  "深度2": {
+   "good": 1243265,
+   "util": 45,
+   "late": 77.3,
+   "kit": 48,
+   "prog": 225,
+   "setupPerM": 378,
+   "downPerM": 162,
+   "waitPct": 7.4,
+   "score": -253705
+  },
+  "深度3": {
+   "good": 1177191,
+   "util": 42.8,
+   "late": 105.8,
+   "kit": 55,
+   "prog": 220,
+   "setupPerM": 387,
+   "downPerM": 160,
+   "waitPct": 8.7,
+   "score": -943424
+  }
+ },
+ "eng": {
+  "4": {
+   "good": 636239,
+   "util": 23.5,
+   "late": 233.4,
+   "kit": 7,
+   "prog": 71,
+   "setupPerM": 84,
+   "downPerM": 146,
+   "waitPct": 59,
+   "score": -4552726
+  },
+  "5": {
+   "good": 898476,
+   "util": 32.7,
+   "late": 186.7,
+   "kit": 10,
+   "prog": 103,
+   "setupPerM": 133,
+   "downPerM": 155,
+   "waitPct": 45.5,
+   "score": -3253290
+  },
+  "6": {
+   "good": 1158386,
+   "util": 41.1,
+   "late": 119.8,
+   "kit": 13,
+   "prog": 137,
+   "setupPerM": 186,
+   "downPerM": 158,
+   "waitPct": 31.8,
+   "score": -1482685
+  },
+  "7": {
+   "good": 1312732,
+   "util": 44.5,
+   "late": 49.8,
+   "kit": 15,
+   "prog": 175,
+   "setupPerM": 238,
+   "downPerM": 160,
+   "waitPct": 22.4,
+   "score": 293237
+  },
+  "8": {
+   "good": 1385465,
+   "util": 46.2,
+   "late": 20.4,
+   "kit": 25,
+   "prog": 195,
+   "setupPerM": 286,
+   "downPerM": 162,
+   "waitPct": 14.4,
+   "score": 1079918
+  },
+  "10": {
+   "good": 1454382,
+   "util": 46.7,
+   "late": 5,
+   "kit": 39,
+   "prog": 213,
+   "setupPerM": 343,
+   "downPerM": 161,
+   "waitPct": 3.7,
+   "score": 1558913
+  },
+  "13": {
+   "good": 1455535,
+   "util": 46.7,
+   "late": 3,
+   "kit": 46,
+   "prog": 221,
+   "setupPerM": 368,
+   "downPerM": 162,
+   "waitPct": 0.4,
+   "score": 1622614
+  },
+  "17": {
+   "good": 1473509,
+   "util": 47.1,
+   "late": 3,
+   "kit": 45,
+   "prog": 218,
+   "setupPerM": 365,
+   "downPerM": 162,
+   "waitPct": 0,
+   "score": 1650914
+  }
+ },
+ "dedicate": {
+  "完全彈性（每台可測全部）": {
+   "good": 1400375,
+   "util": 46.5,
+   "late": 17.5,
+   "kit": 86,
+   "prog": 173,
+   "setupPerM": 402,
+   "downPerM": 160,
+   "waitPct": 14.4,
+   "score": 1100042
+  },
+  "現況（5 彈性 + 20 專用）": {
+   "good": 1454382,
+   "util": 46.7,
+   "late": 5,
+   "kit": 39,
+   "prog": 213,
+   "setupPerM": 343,
+   "downPerM": 161,
+   "waitPct": 3.7,
+   "score": 1558913
+  },
+  "完全專用（每台一種）": {
+   "good": 1435320,
+   "util": 44.9,
+   "late": 5.5,
+   "kit": 0,
+   "prog": 230,
+   "setupPerM": 273,
+   "downPerM": 163,
+   "waitPct": 1.7,
+   "score": 1543343
+  }
+ },
+ "levers": {
+  "現況": {
+   "good": 1454382,
+   "util": 46.7,
+   "late": 5,
+   "kit": 39,
+   "prog": 213,
+   "setupPerM": 343,
+   "downPerM": 161,
+   "waitPct": 3.7,
+   "score": 1558913
+  },
+  "換程式 30→15 分": {
+   "good": 1484196,
+   "util": 47.2,
+   "late": 1.9,
+   "kit": 56,
+   "prog": 216,
+   "setupPerM": 259,
+   "downPerM": 163,
+   "waitPct": 0.8,
+   "score": 1703687
+  },
+  "換 Kit 60→30 分": {
+   "good": 1458194,
+   "util": 48,
+   "late": 12.6,
+   "kit": 84,
+   "prog": 192,
+   "setupPerM": 325,
+   "downPerM": 160,
+   "waitPct": 2.9,
+   "score": 1407684
+  },
+  "當機率減半": {
+   "good": 1437394,
+   "util": 45.7,
+   "late": 1.5,
+   "kit": 52,
+   "prog": 222,
+   "setupPerM": 386,
+   "downPerM": 81,
+   "waitPct": 1.6,
+   "score": 1651499
+  },
+  "全部專用化": {
+   "good": 1435320,
+   "util": 44.9,
+   "late": 5.5,
+   "kit": 0,
+   "prog": 230,
+   "setupPerM": 273,
+   "downPerM": 163,
+   "waitPct": 1.7,
+   "score": 1543343
+  },
+  "專用化＋換程式減半": {
+   "good": 1490824,
+   "util": 44.4,
+   "late": 2,
+   "kit": 0,
+   "prog": 245,
+   "setupPerM": 146,
+   "downPerM": 162,
+   "waitPct": 0.3,
+   "score": 1704118
+  }
+ },
+ "ratio": [
+  {
+   "M": 10,
+   "E": 10,
+   "ratio": 1,
+   "reqRatio": 1,
+   "goodPerM": 62180,
+   "util": 31.1,
+   "waitPct": 0
+  },
+  {
+   "M": 10,
+   "E": 5,
+   "ratio": 2,
+   "reqRatio": 2,
+   "goodPerM": 63783,
+   "util": 31.2,
+   "waitPct": 0.5
+  },
+  {
+   "M": 10,
+   "E": 3,
+   "ratio": 3.3,
+   "reqRatio": 3,
+   "goodPerM": 66029,
+   "util": 33.5,
+   "waitPct": 5.4
+  },
+  {
+   "M": 10,
+   "E": 3,
+   "ratio": 3.3,
+   "reqRatio": 4,
+   "goodPerM": 66029,
+   "util": 33.5,
+   "waitPct": 5.4
+  },
+  {
+   "M": 10,
+   "E": 2,
+   "ratio": 5,
+   "reqRatio": 6,
+   "goodPerM": 51260,
+   "util": 26.7,
+   "waitPct": 27.2
+  },
+  {
+   "M": 10,
+   "E": 1,
+   "ratio": 10,
+   "reqRatio": 8,
+   "goodPerM": 23929,
+   "util": 12.3,
+   "waitPct": 70.6
+  },
+  {
+   "M": 25,
+   "E": 25,
+   "ratio": 1,
+   "reqRatio": 1,
+   "goodPerM": 57586,
+   "util": 66.2,
+   "waitPct": 0
+  },
+  {
+   "M": 25,
+   "E": 13,
+   "ratio": 1.9,
+   "reqRatio": 2,
+   "goodPerM": 57174,
+   "util": 65.9,
+   "waitPct": 0.2
+  },
+  {
+   "M": 25,
+   "E": 8,
+   "ratio": 3.1,
+   "reqRatio": 3,
+   "goodPerM": 54909,
+   "util": 63.4,
+   "waitPct": 4.2
+  },
+  {
+   "M": 25,
+   "E": 6,
+   "ratio": 4.2,
+   "reqRatio": 4,
+   "goodPerM": 51685,
+   "util": 61.6,
+   "waitPct": 13.5
+  },
+  {
+   "M": 25,
+   "E": 4,
+   "ratio": 6.3,
+   "reqRatio": 6,
+   "goodPerM": 25219,
+   "util": 37.1,
+   "waitPct": 46.4
+  },
+  {
+   "M": 25,
+   "E": 3,
+   "ratio": 8.3,
+   "reqRatio": 8,
+   "goodPerM": 15731,
+   "util": 23,
+   "waitPct": 64.5
+  },
+  {
+   "M": 50,
+   "E": 50,
+   "ratio": 1,
+   "reqRatio": 1,
+   "goodPerM": 48055,
+   "util": 78.7,
+   "waitPct": 0
+  },
+  {
+   "M": 50,
+   "E": 25,
+   "ratio": 2,
+   "reqRatio": 2,
+   "goodPerM": 47762,
+   "util": 79.1,
+   "waitPct": 0.1
+  },
+  {
+   "M": 50,
+   "E": 17,
+   "ratio": 2.9,
+   "reqRatio": 3,
+   "goodPerM": 47725,
+   "util": 79.5,
+   "waitPct": 0.5
+  },
+  {
+   "M": 50,
+   "E": 13,
+   "ratio": 3.8,
+   "reqRatio": 4,
+   "goodPerM": 46342,
+   "util": 78.5,
+   "waitPct": 2.4
+  },
+  {
+   "M": 50,
+   "E": 8,
+   "ratio": 6.3,
+   "reqRatio": 6,
+   "goodPerM": 23501,
+   "util": 48.7,
+   "waitPct": 35.4
+  },
+  {
+   "M": 50,
+   "E": 6,
+   "ratio": 8.3,
+   "reqRatio": 8,
+   "goodPerM": 13318,
+   "util": 30.5,
+   "waitPct": 57.3
+  }
+ ]
+}
