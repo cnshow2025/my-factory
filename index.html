@@ -415,7 +415,7 @@ const DEF = {
   qtyBigMin:10000, qtyBigMax:25000,
   tpuMin:0.8, tpuMax:1.8,
   utilWeight:0.3,
-  engineers:3, dueRule:"work", pkgTypes:3, progTypes:4, queueMax:4,
+  engineers:3, engForProg:1, dueRule:"work", pkgTypes:3, progTypes:4, queueMax:4,
   hotRate:18, hotBonus:1.5, latePenalty:5000,
   dueSlackMin:2.5, dueSlackMax:4.0, hotSlackMin:1.3, hotSlackMax:1.8,
   dueSmallH:8, dueMidH:16, dueBigH:36, dueFlatH:16, dueBufferH:6, dueHotFactor:0.5
@@ -436,7 +436,8 @@ const LABEL = {
   tpuMin:["單顆測試下限","秒/site"], tpuMax:["單顆測試上限","秒/site"],
   utilWeight:["稼動率加權","×"],
   pkgTypes:["封裝種類數","種"], progTypes:["測試程式種類數","種"],
-  engineers:["工程師人數","人"], queueMax:["每台預約上限","批"],
+  engineers:["工程師人數","人"],
+  engForProg:["換程式要工程師","1=要 0=不用"], queueMax:["每台預約上限","批"],
   hotRate:["優先批比例","%"], hotBonus:["Hot 準時加成","×"], latePenalty:["逾期扣分","分/批"],
   dueSlackMin:["一般交期寬鬆下限","×工時"], dueSlackMax:["一般交期寬鬆上限","×工時"],
   hotSlackMin:["Hot 交期寬鬆下限","×工時"], hotSlackMax:["Hot 交期寬鬆上限","×工時"],
@@ -572,7 +573,7 @@ function newMachine(i){
     state:"IDLE", prevState:"IDLE", lot:null, phase:null,
     remain:0, total:0, target:null, queue:[], segs:[],
     eng:false, waitSince:null,
-    run:0, setup:0, down:0, idle:0, wait:0, good:0, lots:0
+    run:0, setup:0, down:0, idle:0, wait:0, good:0, lots:0, kitCh:0, progCh:0
   };
 }
 function init(seed){
@@ -612,6 +613,7 @@ function takeNext(m){
   m.lot = lot; lot.state = "ASSIGNED";
   const cost = setupCost(m, lot.pkg, lot.prog);
   if (cost > 0){
+    if (m.kit !== lot.pkg) m.kitCh++; else m.progCh++;
     m.target = {pkg:lot.pkg, prog:lot.prog};
     m.state = "SETUP"; m.total = m.remain = cost;
     log(m.name+" 接下一批 "+lot.id+"，先改機 "+cost+" 分");
@@ -663,9 +665,15 @@ function finishPhase(m){
   takeNext(m);
 }
 
-// 改機與當機維修都要一位工程師；人不夠時機台停著等（當機優先，其次等最久的）
+// 換 Kit 與維修一定要工程師；換程式看設定（很多廠是操作員自己換，不佔工程師）
+function needsEng(m){
+  if (m.state === "DOWN") return true;
+  if (m.state !== "SETUP") return false;
+  return P.engForProg ? true : !!(m.target && m.kit !== m.target.pkg);
+}
+// 人不夠時機台停著等（當機優先，其次等最久的）
 function assignEngineers(){
-  const need = m => m.state === "SETUP" || m.state === "DOWN";
+  const need = needsEng;
   for (const m of S.machines)
     if (m.eng && !need(m)){ m.eng = false; S.engBusy--; m.waitSince = null; }
   const wanting = S.machines.filter(m => need(m) && !m.eng);
@@ -705,7 +713,8 @@ function stepMinute(){
   }
   assignEngineers();
   for (const m of S.machines){
-    const before = m.state, wasRT = m.phase && m.phase !== "T1", hadEng = m.eng;
+    const before = m.state, wasRT = m.phase && m.phase !== "T1";
+    const hadEng = m.eng || !needsEng(m);   // 不需要工程師的改機不算在等人
     const beforePhase = m.phase, beforeLot = m.lot ? m.lot.id : null;
     const beforeTarget = m.target ? m.target.pkg+"/"+m.target.prog : null;
     switch(m.state){
@@ -718,7 +727,7 @@ function stepMinute(){
         }
         break;
       case "SETUP":
-        if (!m.eng){ m.wait++; break; }      // 沒工程師，改機不會開始
+        if (needsEng(m) && !m.eng){ m.wait++; break; }   // 要工程師卻沒人，改機不會開始
         m.setup++; m.remain--;
         if (m.remain <= 0){
           m.kit = m.target.pkg; m.prog = m.target.prog; m.target = null;
@@ -783,6 +792,7 @@ function assign(m, lot){
   m.lot = lot; lot.state = "ASSIGNED";
   const cost = setupCost(m, lot.pkg, lot.prog);
   if (cost > 0){
+    if (m.kit !== lot.pkg) m.kitCh++; else m.progCh++;
     m.target = {pkg:lot.pkg, prog:lot.prog};
     m.state = "SETUP"; m.total = m.remain = cost;
     log(m.name+" 改機 "+cost+" 分（"+m.kit+"/"+m.prog+" → "+lot.pkg+"/"+lot.prog+"）for "+lot.id);
@@ -856,6 +866,7 @@ function convert(m, pkg, prog){
   if (!canRun(m, pkg)){ log("✋ "+m.name+" 不能裝封裝 "+pkg+" 的 Kit"); render(); return; }
   const cost = setupCost(m, pkg, prog);
   if (cost === 0){ log(m.name+" 已經是 "+pkg+"/"+prog+"，免改機"); render(); return; }
+  if (m.kit !== pkg) m.kitCh++; else m.progCh++;
   m.target = {pkg, prog}; m.state = "SETUP"; m.total = m.remain = cost;
   log(m.name+" 預先改機 "+cost+" 分 → "+pkg+"/"+prog);
   render();
@@ -880,7 +891,7 @@ function testerIcon(color){
 // 畫面上的狀態：Retest 與「等工程師」都要跟原本的狀態分開
 function visualState(m){
   if (m.state === "RUN" && m.phase && m.phase !== "T1") return "RT";
-  if (m.state === "SETUP" && !m.eng) return "WAITSET";
+  if (m.state === "SETUP" && needsEng(m) && !m.eng) return "WAITSET";
   if (m.state === "DOWN"  && !m.eng) return "WAITFIX";
   return m.state;
 }
@@ -977,7 +988,7 @@ function render(){
                      + `<br><span style="color:var(--dim)">已等 ${S.t - m.waitSince} 分 · 維修還沒開始</span>`)
           + (m.lot ? `<br><span style="color:var(--dim)">${m.lot.id} 暫停</span>` : "");
     else if (m.state === "SETUP")
-      job = (m.eng ? `<b style="color:var(--setup)">改機中</b> → ${m.target.pkg}/${m.target.prog}`
+      job = ((m.eng || !needsEng(m)) ? `<b style="color:var(--setup)">改機中</b> → ${m.target.pkg}/${m.target.prog}`
                      + `<br>剩 ${m.remain} 分`
                    : `<b style="color:var(--setup);opacity:.75">等工程師（改機）</b> → ${m.target.pkg}/${m.target.prog}`
                      + `<br><span style="color:var(--dim)">已等 ${S.t - m.waitSince} 分 · 改機還沒開始</span>`)
@@ -1008,7 +1019,7 @@ function render(){
       <div class="tl">${timelineSVG(m)}</div>
       <div class="mstat"><span>良品 ${nf(m.good)}</span><span>完成 ${m.lots} 批</span>
         <span>稼動 ${(m.run/Math.max(1,S.t)*100).toFixed(0)}%</span>
-        <span>改機 ${m.setup} 分</span><span>當機 ${m.down} 分</span>
+        <span>改機 ${m.setup} 分（Kit ${m.kitCh} · 程式 ${m.progCh}）</span><span>當機 ${m.down} 分</span>
         <span${m.wait ? ` style="color:var(--setup)"` : ""}>等人 ${m.wait} 分</span></div>
       <div class="tools">
         <select data-cvp="${m.id}" ${m.state!=="IDLE"||m.lot?"disabled":""}>${opts((P.cap[m.id]||"").split(""),m.kit)}</select>
@@ -1469,9 +1480,9 @@ function endGame(){
     + `</div>`;
 
   $("#ovTable").innerHTML =
-    `<table><tr><th>機台</th><th>良品</th><th>完成批</th><th>測試</th><th>改機</th><th>當機</th><th>等人</th><th>閒置</th><th>稼動率</th></tr>`
+    `<table><tr><th>機台</th><th>良品</th><th>完成批</th><th>測試</th><th>換Kit</th><th>換程式</th><th>改機分</th><th>當機</th><th>等人</th><th>閒置</th><th>稼動率</th></tr>`
     + S.machines.map(m => `<tr><td>${m.name}</td><td>${nf(m.good)}</td><td>${m.lots}</td>
-        <td>${m.run}</td><td>${m.setup}</td><td>${m.down}</td><td>${m.wait}</td><td>${m.idle}</td>
+        <td>${m.run}</td><td>${m.kitCh}</td><td>${m.progCh}</td><td>${m.setup}</td><td>${m.down}</td><td>${m.wait}</td><td>${m.idle}</td>
         <td>${(m.run/DAY*100).toFixed(0)}%</td></tr>`).join("")
     + `</table>`;
   $("#ov").classList.add("show");
@@ -1503,9 +1514,12 @@ const PRESETS = [
          "換 Kit 60 分、換程式 30 分、良率 80~99%、RT 門檻 99/98、一天 24 小時三班。" +
          "當機率 11.5%/小時（校準到維修工時約為改機的 1.5 倍）、修復 10~120 分、" +
          "Retest 救回率 60%、HOT 比例 10%、逾期一批扣 20,000 分、產品集中度 50%。" +
-         "實際產線是 25 台機，畫面上維持 5 台方便手動玩；人機比跑分請用 25 台。",
+         "機隊 25 台：5 台 8 site、10 台 4 site、10 台 2 site（等效 100 site、平均 4）。" +
+         "能力配置：5 台彈性支援全封裝 + 20 台各專用一種，校準到一天約 50 次換 Kit。" +
+         "要手動玩可把機台數改小；人機比跑分請用 25 台。",
     P:Object.assign({}, DEF, {
-      machines:5, engineers:3, setupPkg:60, setupProg:30,
+      machines:25, engineers:10, engForProg:1, setupPkg:60, setupProg:30,
+      speed:[8,8,8,8,8, 4,4,4,4,4,4,4,4,4,4, 2,2,2,2,2,2,2,2,2,2],
       pkgTypes:5, progTypes:8,
       yieldMin:80, yieldMax:99, gate1:99, gate2:98,
       recoverMin:40, recoverMax:80,
@@ -1516,10 +1530,12 @@ const PRESETS = [
       qtyMidMin:2000, qtyMidMax:10000,
       qtyBigMin:10000, qtyBigMax:25000,
       tpuMin:2, tpuMax:2,
-      arrivalEvery:45, arrivalBatch:1, initialLots:6,
+      arrivalEvery:4, arrivalBatch:1, initialLots:30,
       hotRate:10, hotBonus:1.5, latePenalty:20000,
       queueMax:4, realSeconds:300,
-      cap:["ABCDE","ABCDE","ABCDE","ABCDE","ABCDE"]
+      // 5 台彈性支援全部封裝，20 台各專用一種：校準到現場「一天約 50 次換 Kit」
+      cap:["ABCDE","ABCDE","ABCDE","ABCDE","ABCDE",
+           "A","B","C","D","E", "A","B","C","D","E", "A","B","C","D","E", "A","B","C","D","E"]
     }) }
 ];
 const LS_KEY = "myfactory.preset.myfab";
