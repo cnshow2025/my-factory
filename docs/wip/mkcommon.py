@@ -89,6 +89,7 @@ def build(path, lots, machines, note=None, example=False):
     how = [
      ("「貨批」分頁", "一列一批待測貨。把現場 WIP 清單貼進來，必填欄位不能空白。"),
      ("「機台」分頁", "一列一台測試機，包含它現在裝著什麼 Kit、載著什麼程式。"),
+     ("「能力矩陣」分頁", "機台 × 封裝的打勾表。有這頁就以它為準，蓋過「機台」分頁的 can_packages；刪掉整頁就回去讀 can_packages。"),
      ("欄位標題",     "滑鼠移到標題格會跳出這個欄位的中文說明。"),
      ("代號自由命名", "package / program 直接用你現場的名字，種類多少都可以，模擬器會自動吃進去。"),
     ]
@@ -99,35 +100,43 @@ def build(path, lots, machines, note=None, example=False):
         ws.cell(row=r, column=1, value=a).font = Font(name=F, bold=True, size=10, color=INK)
         ws.cell(row=r, column=3, value=b).font = Font(name=F, size=10, color=INK)
 
-    ws["A11"] = "貨批 — 欄位說明"; ws["A11"].font = Font(name=F, bold=True, size=13, color=NAVY)
-    _hdr(ws, 12, ["欄位", "必填", "說明", "範例"], fill=TEAL)
+    LOT_TITLE = 5 + len(how) + 1
+    ws.cell(row=LOT_TITLE, column=1, value="貨批 — 欄位說明") \
+      .font = Font(name=F, bold=True, size=13, color=NAVY)
+    _hdr(ws, LOT_TITLE + 1, ["欄位", "必填", "說明", "範例"], fill=TEAL)
     for i, row in enumerate(LOTS_DOC):
-        r = 13 + i; _put(ws, r, list(row))
+        r = LOT_TITLE + 2 + i; _put(ws, r, list(row))
         ws.cell(row=r, column=1).font = Font(name=F, bold=True, size=10, color=INK)
         if row[1] == "必填":
             ws.cell(row=r, column=2).font = Font(name=F, bold=True, size=10, color=RED)
 
-    ws["A24"] = "機台 — 欄位說明"; ws["A24"].font = Font(name=F, bold=True, size=13, color=NAVY)
-    _hdr(ws, 25, ["欄位", "必填", "說明", "範例"], fill=TEAL)
+    MACH_TITLE = LOT_TITLE + 2 + len(LOTS_DOC) + 1
+    ws.cell(row=MACH_TITLE, column=1, value="機台 — 欄位說明") \
+      .font = Font(name=F, bold=True, size=13, color=NAVY)
+    _hdr(ws, MACH_TITLE + 1, ["欄位", "必填", "說明", "範例"], fill=TEAL)
     for i, row in enumerate(MACH_DOC):
-        r = 26 + i; _put(ws, r, list(row))
+        r = MACH_TITLE + 2 + i; _put(ws, r, list(row))
         ws.cell(row=r, column=1).font = Font(name=F, bold=True, size=10, color=INK)
         if row[1] == "必填":
             ws.cell(row=r, column=2).font = Font(name=F, bold=True, size=10, color=RED)
 
-    ws["A34"] = "填完自動檢查（不用手動算，改資料會跟著變）"
-    ws["A34"].font = Font(name=F, bold=True, size=13, color=NAVY)
-    _hdr(ws, 35, ["項目", "", "數值", "單位"], fill=TEAL)
+    CHK_TITLE = MACH_TITLE + 2 + len(MACH_DOC) + 1
+    CHK_HEAD  = CHK_TITLE + 1
+    CHK_FIRST = CHK_HEAD + 1                            # 第一列統計（貨批筆數）
+    ws.cell(row=CHK_TITLE, column=1, value="填完自動檢查（不用手動算，改資料會跟著變）") \
+      .font = Font(name=F, bold=True, size=13, color=NAVY)
+    _hdr(ws, CHK_HEAD, ["項目", "", "數值", "單位"], fill=TEAL)
     CHK = [
      ("貨批筆數",             "=COUNTA(貨批!A2:A5000)",                        "筆"),
      ("總顆數",               "=SUM(貨批!D2:D5000)",                           "顆"),
      ("純測試工時（1 site）", "=SUMPRODUCT(貨批!D2:D5000,貨批!E2:E5000)/3600", "小時"),
      ("機台台數",             "=COUNTA(機台!A2:A500)",                         "台"),
      ("機隊等效 site 總數",   "=SUM(機台!B2:B500)",                            "site"),
-     ("理論最短清空時間",     "=IFERROR(C38/C40,0)",                           "小時（不含改機與當機，排程再好也快不過這個）"),
+     ("理論最短清空時間",     "=IFERROR(C{work}/C{sites},0)",                  "小時（不含改機與當機，排程再好也快不過這個）"),
     ]
     for i, (label, formula, unit) in enumerate(CHK):
-        r = 36 + i
+        r = CHK_FIRST + i
+        formula = formula.format(work=CHK_FIRST + 2, sites=CHK_FIRST + 4)
         ws.cell(row=r, column=1, value=label).font = Font(name=F, bold=True, size=10, color=INK)
         c = ws.cell(row=r, column=3, value=formula)
         c.font = Font(name=F, size=10, color=INK); c.number_format = "#,##0.0"
@@ -136,7 +145,7 @@ def build(path, lots, machines, note=None, example=False):
     for i, t in enumerate([
         "「理論最短清空時間」＝ 純測試工時 ÷ 機隊等效 site 總數。它假設零改機、零當機、機台永遠不閒著，",
         "所以實際一定比它長。模擬跑出來的數字離它多遠，就是改機與排程吃掉的部分。"]):
-        ws.cell(row=43+i, column=1, value=t).font = Font(name=F, size=10, color=GREY)
+        ws.cell(row=CHK_FIRST + len(CHK) + 1 + i, column=1, value=t).font = Font(name=F, size=10, color=GREY)
 
     # ---------- 貨批 ----------
     ws = wb.create_sheet("貨批")
@@ -161,7 +170,7 @@ def build(path, lots, machines, note=None, example=False):
     wb.save(path)
 
 
-def add_matrix(path, lots, machines, pkgs):
+def add_matrix(path, lots, machines, pkgs, example=False):
     """加一頁「能力矩陣」：機台 × 封裝的對照表，外加產能 vs 貨量的檢查。
 
     這頁是對照用的，模擬器讀的仍然是「機台」分頁的 can_packages。
@@ -183,12 +192,13 @@ def add_matrix(path, lots, machines, pkgs):
         can = m["can"] if m["can"] else pkgs        # 空白＝全部都能測
         row = [m["id"], m["sites"]] + ["✔" if p in can else "" for p in pkgs] \
               + [m["kit"], m["prog"], m["avail"]]
-        _put(ws, r, row)
+        _put(ws, r, row, blue=example)
         for c in range(first, last + 1):
             cell = ws.cell(row=r, column=c)
             cell.alignment = Alignment(horizontal="center")
             if cell.value == "✔":
-                cell.font = Font(name=F, size=11, bold=True, color=TEAL)
+                cell.font = Font(name=F, size=11, bold=True,
+                                 color="0000FF" if example else TEAL)
         # 目前正裝著的那一格反白，一眼看出機隊現在停在什麼配置
         if m["kit"] in pkgs:
             k = ws.cell(row=r, column=first + pkgs.index(m["kit"]))
@@ -200,8 +210,7 @@ def add_matrix(path, lots, machines, pkgs):
         ("目前正裝著這種 Kit 的 site", '=SUMIF($%s$%d:$%s$%d,{c}$1,$B$%d:$B$%d)'
             % (CL(last+1), r0, CL(last+1), r1, r0, r1)),
         ("這批貨的工時（分，1 site）",
-            '=SUMPRODUCT((貨批!$B$2:$B$%d={c}$1)*貨批!$D$2:$D$%d*貨批!$E$2:$E$%d)/60'
-            % (len(lots)+1, len(lots)+1, len(lots)+1)),
+            '=SUMPRODUCT((貨批!$B$2:$B$5000={c}$1)*貨批!$D$2:$D$5000*貨批!$E$2:$E$5000)/60'),
     ]
     base = r1 + 2
     for j, (label, tpl) in enumerate(stats):
@@ -234,6 +243,7 @@ def add_matrix(path, lots, machines, pkgs):
         "哪一種明顯偏高，就是這批貨的瓶頸——代表它的量和現在裝著它的 site 數對不上，得先換 Kit 把配置拉回來。",
         "刪掉整頁也可以，模擬器會改用「機台」分頁的 can_packages。",
         "機台清單（台數、sites、目前 Kit、幾小時後可用）仍然以「機台」分頁為準，這頁只決定能力。",
+        "要加機台：在現有的列中間「插入列」，下面的統計公式會自己跟著長；直接往最後一列底下打字則不會。",
     ]
     for j, t in enumerate(notes):
         ws.cell(row=r + 2 + j, column=1, value=t).font = Font(name=F, size=10, color=GREY)
