@@ -299,7 +299,8 @@
           <button id="wipClear" style="display:none">移除，回到遊戲模式</button>
         </div>
         <div class="adesc" id="wipHint">載入「貨批」「機台」兩個分頁的 xlsx，模擬就不再用亂數產生貨，改成跑你真實的 WIP，
-          一路跑到最後一批做完為止，比較各種排程法則要花多久。檔案格式見 docs/ 的填寫範本。</div>
+          一路跑到最後一批做完為止，比較各種排程法則要花多久。檔案若有「能力矩陣」分頁，
+          機台能力就以那頁的打勾為準。檔案格式見 docs/ 的填寫範本。</div>
         <div id="wipSummary"></div>
         <div class="arow" id="wipRun" style="display:none;margin-top:10px">
           <label>模式 <select id="wipMode">
@@ -1286,8 +1287,11 @@ function colIndex(ref){                      // "AB12" → 27
   return n - 1;
 }
 function sheetRows(doc, shared){
+  // 依實際列號放進陣列：Excel 不會寫出完全空白的列，若照出現順序堆疊，
+  // 空白列就會被吃掉——而「空白列＝資料結束」正是能力矩陣用來分隔統計列的依據。
   const rows = [];
   for (const row of doc.getElementsByTagName("row")){
+    const rn = +(row.getAttribute("r") || 0);
     const arr = [];
     for (const c of row.getElementsByTagName("c")){
       const i = colIndex(c.getAttribute("r") || "");
@@ -1304,7 +1308,7 @@ function sheetRows(doc, shared){
       }
       if (i >= 0) arr[i] = v;
     }
-    rows.push(arr);
+    if (rn > 0) rows[rn - 1] = arr; else rows.push(arr);
   }
   return rows;
 }
@@ -1324,6 +1328,44 @@ function headerMap(rows, keys){
 }
 const num = v => { const n = +v; return Number.isFinite(n) ? n : null; };
 const str = v => { const t = String(v ?? "").trim(); return t === "" ? null : t; };
+
+// 「能力矩陣」分頁：機台 × 封裝的打勾表。勾選比編輯 "QFN48|QFN32" 這種字串好用得多，
+// 所以只要這頁存在，它就蓋過「機台」分頁的 can_packages。
+const MATRIX_TAIL = ["目前裝著的 kit","目前裝著的kit","目前程式","幾小時後可用",
+                     "kit_now","prog_now","available_at_h"];
+const MATRIX_NO   = ["x","✗","✘","-","–","—","0","n","no","否","不可"];
+const ticked = v => {
+  const t = String(v ?? "").trim();
+  return t !== "" && !MATRIX_NO.includes(t.toLowerCase());
+};
+function parseMatrix(rows){
+  // 標題列：第一格「機台」、第二格「sites」
+  let h = -1;
+  for (let r = 0; r < Math.min(rows.length, 6); r++){
+    const c = rows[r] || [];
+    if (String(c[0] ?? "").trim() === "機台" && String(c[1] ?? "").trim().toLowerCase() === "sites"){ h = r; break; }
+  }
+  if (h < 0) return null;
+  const head = rows[h];
+  // 封裝欄 ＝ 第三欄起，直到遇到空欄或尾端的固定欄位
+  const cols = [];
+  for (let c = 2; c < head.length; c++){
+    const name = String(head[c] ?? "").trim();
+    if (!name || MATRIX_TAIL.includes(name.toLowerCase())) break;
+    cols.push({ c, name });
+  }
+  if (!cols.length) return null;
+  const caps = {}, blanks = [];
+  for (let r = h + 1; r < rows.length; r++){
+    const row = rows[r] || [];
+    const id = String(row[0] ?? "").trim();
+    if (!id) break;                                   // 空白列＝資料結束，下面是統計列
+    const can = cols.filter(x => ticked(row[x.c])).map(x => x.name);
+    if (!can.length) blanks.push(id);
+    caps[id] = can;
+  }
+  return { pkgs: cols.map(x => x.name), caps, blanks };
+}
 
 function parseDataset(sheets, fileName){
   const lotSheet  = sheets["貨批"] || sheets["lots"] || sheets["Lots"];
@@ -1385,23 +1427,45 @@ function parseDataset(sheets, fileName){
   if (!lots.length)     throw new Error("「貨批」分頁沒有讀到任何有效資料");
   if (!machines.length) throw new Error("「機台」分頁沒有讀到任何有效資料");
 
+  // 有「能力矩陣」分頁就以它為準（機台清單仍然看「機台」分頁，只換能力）
+  const mxSheet = sheets["能力矩陣"] || sheets["matrix"] || sheets["Matrix"];
+  const mx = mxSheet ? parseMatrix(mxSheet) : null;
+  let capSource = "機台分頁的 can_packages";
+  if (mx){
+    capSource = "能力矩陣分頁的打勾";
+    const known = new Set(machines.map(m => m.id));
+    for (const m of machines){
+      if (mx.caps[m.id] === undefined){
+        problems.push("能力矩陣裡找不到機台 " + m.id + "，這台沿用 can_packages");
+        continue;
+      }
+      m.can = mx.caps[m.id].slice();
+    }
+    const extra = Object.keys(mx.caps).filter(id => !known.has(id));
+    if (extra.length)
+      problems.push("能力矩陣有「機台」分頁沒有的機台：" + extra.join("、") + "（已忽略）");
+    if (mx.blanks.length)
+      problems.push("能力矩陣裡 " + mx.blanks.join("、") + " 一個封裝都沒勾 → 視為全部都能測");
+  }
+
   // 代號以檔案為準：貨批與機台出現過的都算，順序照第一次出現
   const pkgs = [], progs = [];
   const add = (a, v) => { if (v && !a.includes(v)) a.push(v); };
   lots.forEach(l => { add(pkgs, l.pkg); add(progs, l.prog); });
   machines.forEach(m => { add(pkgs, m.kit); add(progs, m.prog); m.can.forEach(c => add(pkgs, c)); });
+  if (mx) mx.pkgs.forEach(c => add(pkgs, c));      // 矩陣標題列出現的封裝也算數
 
   // 能測的封裝若填了檔案裡不存在的代號，視同沒填（全部都能測），並提醒
   machines.forEach(m => {
     const bad = m.can.filter(c => !pkgs.includes(c));
-    if (bad.length) problems.push("機台 " + m.id + "：can_packages 的 " + bad.join("、") + " 在資料裡沒出現過");
+    if (bad.length) problems.push("機台 " + m.id + "：" + bad.join("、") + " 在資料裡沒出現過");
     m.can = m.can.filter(c => pkgs.includes(c));
   });
   const orphan = pkgs.filter(pk => !machines.some(m => !m.can.length || m.can.includes(pk)));
   if (orphan.length)
     problems.push("封裝 " + orphan.join("、") + " 沒有任何機台能測，這些批永遠做不完——請補上機台能力");
 
-  return { name: fileName, lots, machines, pkgs, progs, problems, orphan };
+  return { name: fileName, lots, machines, pkgs, progs, problems, orphan, capSource };
 }
 
 /* ---- 套用到參數：機台數、site 數、能力矩陣都以檔案為準 ---- */

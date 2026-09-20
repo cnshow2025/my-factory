@@ -227,11 +227,13 @@ def add_matrix(path, lots, machines, pkgs):
         cell.fill = PatternFill("solid", fgColor="FFE8D9")
 
     notes = [
-        "✔ ＝ 這台機可以測這種封裝（對應「機台」分頁的 can_packages；空白代表該台什麼都能測，這裡會全部打勾）。",
+        "✔ ＝ 這台機可以測這種封裝。要改就直接在格子裡打勾或清掉，模擬器以這頁為準。",
+        "（打勾符號用 ✔ V O Y 1 都可以；留白或填 X 就是不能測。整列都沒勾＝視為全部都能測。）",
         "黃底 ＝ 這台機「現在」裝著的 Kit，也就是機隊此刻停在什麼配置。",
         "最後一列是重點：把機隊凍結在現在的配置（完全不換 Kit），每種封裝各要跑多久。",
         "哪一種明顯偏高，就是這批貨的瓶頸——代表它的量和現在裝著它的 site 數對不上，得先換 Kit 把配置拉回來。",
-        "這頁是對照用的，模擬器讀的仍然是「機台」分頁；改這裡不會改變模擬結果。",
+        "刪掉整頁也可以，模擬器會改用「機台」分頁的 can_packages。",
+        "機台清單（台數、sites、目前 Kit、幾小時後可用）仍然以「機台」分頁為準，這頁只決定能力。",
     ]
     for j, t in enumerate(notes):
         ws.cell(row=r + 2 + j, column=1, value=t).font = Font(name=F, size=10, color=GREY)
