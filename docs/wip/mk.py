@@ -85,6 +85,9 @@ C.add_matrix(OUT,
               for r in MACH_ROWS],
              PKG_ORDER, example=True)
 
+# 配件：Kit 套數。刻意讓每種都少於機台數，示範治具會卡
+C.add_kits(OUT, PKG_ORDER, {"QFN48": 2, "QFN32": 2, "SOP16": 2, "TSSOP28": 1})
+
 tot = sum(r[3] * r[4] for r in LOT_ROWS)
 print("saved %s：%d 批 / %s 顆 / 純測試工時 %.1f h / 機隊 %d site / 理論最短 %.2f h"
       % (OUT, len(LOT_ROWS), format(sum(r[3] for r in LOT_ROWS), ","),

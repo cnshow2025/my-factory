@@ -285,6 +285,7 @@
       <span><i style="background:var(--down)"></i>當機</span>
       <span><i style="background:rgba(210,153,34,.40)"></i>等工程師(改機)</span>
       <span><i style="background:rgba(248,81,73,.40)"></i>等工程師(維修)</span>
+      <span><i style="background:rgba(139,148,158,.55)"></i>等 Kit</span>
       <span><i style="background:#30363d"></i>閒置</span>
     </div>
     <div id="lines"></div>
@@ -613,7 +614,7 @@ function newMachine(i){
     state:"IDLE", prevState:"IDLE", lot:null, phase:null,
     remain:0, total:0, target:null, queue:[], segs:[],
     eng:false, waitSince:null,
-    run:0, setup:0, down:0, idle:0, wait:0, good:0, lots:0, kitCh:0, progCh:0
+    readyAt:0, run:0, setup:0, down:0, idle:0, wait:0, waitKit:0, good:0, lots:0, kitCh:0, progCh:0
   };
 }
 function init(seed){
@@ -657,6 +658,9 @@ function phaseMinutes(lot, qty, m){
 // 現批做完 → 自動接下一批預約（該改機就自動改機）
 function takeNext(m){
   if (!m.queue.length){ m.state = "IDLE"; m.total = m.remain = 0; return; }
+  if (!takeKit(m, m.queue[0].pkg)){        // Kit 還沒空出來，這一分鐘先不接
+    m.state = "IDLE"; m.total = m.remain = 0; return;
+  }
   const lot = m.queue.shift();
   m.lot = lot; lot.state = "ASSIGNED";
   const cost = setupCost(m, lot.pkg, lot.prog);
@@ -798,19 +802,23 @@ function stepMinute(){
       default:
         if (ready(m) && !m.lot && m.queue.length){ takeNext(m); break; }
         m.idle++;
+        if (waitingKit(m)) m.waitKit++;      // 閒著，但卡的是治具不是沒貨
     }
     // 記下這一分鐘這台機在做什麼（含當時那批貨），合併成連續區段供時間軸使用。
     // SILENT＝批次跑分，沒有畫面要畫，這段直接跳過（跑到清空可能長達數天，區段會爆量）
     if (SILENT) continue;
+    const kitBlockedBy = before === "IDLE" ? waitingKit(m) : null;
     const code = before === "DOWN"  ? (hadEng ? "DOWN" : "WAITFIX")
                : before === "SETUP" ? (hadEng ? "SETUP" : "WAITSET")
-               : before === "RUN"   ? (wasRT ? "RT" : "RUN") : "IDLE";
+               : before === "RUN"   ? (wasRT ? "RT" : "RUN")
+               : kitBlockedBy ? "WAITKIT" : "IDLE";
     const label = code === "WAITFIX" ? "等工程師（維修）" + (beforeLot ? "（"+beforeLot+" 暫停）" : "")
                 : code === "WAITSET" ? "等工程師（改機"
                                      + (beforeTarget ? " → "+beforeTarget : "") + "）"
                 : code === "DOWN"  ? "當機維修" + (beforeLot ? "（"+beforeLot+" 暫停）" : "")
                 : code === "SETUP" ? "改機" + (beforeTarget ? " → "+beforeTarget : "")
                                    + (beforeLot ? "（準備 "+beforeLot+"）" : "")
+                : code === "WAITKIT" ? "等 Kit（" + kitBlockedBy + " 的治具都在用）"
                 : code === "IDLE"  ? (ready(m) ? "閒置待料" : "尚未開放（保養／在跑別的貨）")
                                    : beforePhase + " " + beforeLot;
     const last = m.segs[m.segs.length-1];
@@ -846,10 +854,53 @@ function dueInfo(lot){
 /* ---------- 操作 ---------- */
 // 機台要過了 readyAt 才算開放（檔案裡的 available_at_h：保養中或還在跑別的貨）
 function ready(m){ return S.t >= (m.readyAt || 0); }
+
+/* ---- 配件（Kit 治具）套數 ----
+   某種封裝有 N 套 Kit，就最多只有 N 台機能同時裝著它。沒填＝不限量，
+   所以沒有「配件」分頁的檔案，跑出來的結果和以前完全一樣。 */
+function kitLimit(pkg){
+  const k = DATASET && DATASET.kits ? DATASET.kits[pkg] : undefined;
+  return (k === undefined || k === null || !(k > 0)) ? Infinity : k;
+}
+function kitLimited(){ return !!(DATASET && DATASET.kits && Object.keys(DATASET.kits).length); }
+// 一台機佔著哪一套 Kit：改機中算「目標」那套，因為舊的已經拆下來了
+function heldKit(m){ return (m.target && m.target.pkg !== m.kit) ? m.target.pkg : m.kit; }
+function kitInUse(pkg){ return S.machines.reduce((n, m) => n + (heldKit(m) === pkg ? 1 : 0), 0); }
+// 閒置、手上沒批、待接區也沒有同封裝的批 → 這套 Kit 可以被搬走
+function kitFreeable(m, pkg){
+  return heldKit(m) === pkg && ready(m) && m.state === "IDLE" && !m.lot
+      && !m.queue.some(l => l.pkg === pkg);
+}
+// 純查詢：m 要換到 pkg，拿不拿得到 Kit（不動任何狀態，給派工篩選用）
+function kitAvailable(m, pkg){
+  if (m.kit === pkg) return true;
+  const lim = kitLimit(pkg);
+  if (lim === Infinity) return true;
+  return kitInUse(pkg) < lim || S.machines.some(x => x !== m && kitFreeable(x, pkg));
+}
+// 真的去拿：不夠就從閒置機上搬一套過來，搬不到就 false
+function takeKit(m, pkg){
+  if (m.kit === pkg) return true;
+  const lim = kitLimit(pkg);
+  if (lim === Infinity) return true;
+  if (kitInUse(pkg) < lim) return true;
+  const donor = S.machines.find(x => x !== m && kitFreeable(x, pkg));
+  if (!donor) return false;
+  donor.kit = null;                     // 治具被搬走，變成空機
+  log("🧰 " + pkg + " 的 Kit 從 " + donor.name + " 搬到 " + m.name);
+  return true;
+}
+// 這台機現在是「閒著等 Kit」嗎——有它能測的批，卡的只是治具
+function waitingKit(m){
+  if (!kitLimited() || m.lot || m.queue.length || m.state !== "IDLE" || !ready(m)) return null;
+  const l = S.lots.find(x => x.state === "WIP" && canRun(m, x.pkg) && !kitAvailable(m, x.pkg));
+  return l ? l.pkg : null;
+}
 function assign(m, lot){
   if (m.state !== "IDLE" || m.lot) return;
   if (!ready(m)){ log("✋ "+m.name+" 還沒開放（"+hhmm(m.readyAt)+" 才空出來）"); return; }
   if (!canRun(m, lot.pkg)){ log("✋ "+m.name+" 不能測封裝 "+lot.pkg+"（"+lot.id+"）"); return; }
+  if (!takeKit(m, lot.pkg)){ log("🧰 "+m.name+" 等 "+lot.pkg+" 的 Kit（"+kitLimit(lot.pkg)+" 套都在用）"); return; }
   m.lot = lot; lot.state = "ASSIGNED";
   const cost = setupCost(m, lot.pkg, lot.prog);
   if (cost > 0){
@@ -879,6 +930,7 @@ function tailCost(m, lot){
 function enqueue(m, lot){
   if (m.queue.length >= P.queueMax) return;
   if (!canRun(m, lot.pkg)){ log("✋ "+m.name+" 不能測封裝 "+lot.pkg+"（"+lot.id+"）"); return; }
+  if (!kitAvailable(m, lot.pkg)){ log("🧰 "+m.name+" 現在排不到 "+lot.pkg+" 的 Kit（"+lot.id+"）"); return; }
   lot.state = "QUEUED"; lot.machine = m.name;
   m.queue.push(lot);
   log(m.name+" 預約 "+lot.id+"（待接第 "+m.queue.length+" 位）");
@@ -925,6 +977,8 @@ function preempt(m, lot){
 function convert(m, pkg, prog){
   if (m.state !== "IDLE" || m.lot) return;
   if (!canRun(m, pkg)){ log("✋ "+m.name+" 不能裝封裝 "+pkg+" 的 Kit"); render(); return; }
+  if (!takeKit(m, pkg)){
+    log("🧰 "+m.name+" 等 "+pkg+" 的 Kit（"+kitLimit(pkg)+" 套都在用）"); render(); return; }
   const cost = setupCost(m, pkg, prog);
   if (cost === 0){ log(m.name+" 已經是 "+pkg+"/"+prog+"，免改機"); render(); return; }
   if (m.kit !== pkg) m.kitCh++; else m.progCh++;
@@ -937,7 +991,9 @@ function convert(m, pkg, prog){
 const STATE_COLOR = { RUN:"var(--run)", RT:"var(--rt)", SETUP:"var(--setup)",
                       DOWN:"var(--down)", IDLE:"#30363d",
                       // 等工程師：同色系但淡一階，代表機器停著純粹在等人
-                      WAITSET:"rgba(210,153,34,.40)", WAITFIX:"rgba(248,81,73,.40)" };
+                      WAITSET:"rgba(210,153,34,.40)", WAITFIX:"rgba(248,81,73,.40)",
+                      // 等 Kit：機器停著，缺的是治具不是人
+                      WAITKIT:"rgba(139,148,158,.55)" };
 // 簡潔的測試機線條圖：機殼 + 螢幕 + handler 送料臂
 function testerIcon(color){
   return `<g stroke="${color}" stroke-width="1.6" fill="none" stroke-linejoin="round" stroke-linecap="round">
@@ -1171,7 +1227,7 @@ function autoPreempt(){
     let victim = null;
     for (const m of S.machines){
       if (m.state !== "RUN" || !m.lot || m.lot.hot) continue;
-      if (!ready(m) || !canRun(m, h.pkg)) continue;
+      if (!ready(m) || !canRun(m, h.pkg) || !kitAvailable(m, h.pkg)) continue;
       if (c.from === m && m.queue[0] === h) continue; // 本來就排在這台第一順位，等一下就輪到了
       const v = m.lot;
       // 被犧牲的批進度歸零要重測，所以用完整工時估它還來不來得及
@@ -1194,7 +1250,7 @@ function autoDispatch(){
   if (wip.length){
     for (const m of S.machines){
       if (ready(m) && m.state === "IDLE" && !m.lot && wip.length){
-        const best = pickBest(wip.filter(l => canRun(m, l.pkg)), m, pol);
+        const best = pickBest(wip.filter(l => canRun(m, l.pkg) && kitAvailable(m, l.pkg)), m, pol);
         if (best){ assign(m, best); wip = wip.filter(l => l !== best); }
       }
     }
@@ -1202,7 +1258,7 @@ function autoDispatch(){
     for (const m of S.machines){
       if (!ready(m)) continue;
       while (m.queue.length < depth && wip.length){
-        const best = pickBest(wip.filter(l => canRun(m, l.pkg)), m, pol);
+        const best = pickBest(wip.filter(l => canRun(m, l.pkg) && kitAvailable(m, l.pkg)), m, pol);
         if (!best) break;
         enqueue(m, best); wip = wip.filter(l => l !== best);
       }
@@ -1367,6 +1423,28 @@ function parseMatrix(rows){
   return { pkgs: cols.map(x => x.name), caps, blanks };
 }
 
+// 「配件」分頁：package | kits。沒有這一頁 ＝ 治具不限量。
+function parseKits(rows){
+  let h = -1;
+  for (let r = 0; r < Math.min(rows.length, 6); r++){
+    const c = (rows[r] || []).map(v => String(v ?? "").trim().toLowerCase());
+    if (c.indexOf("package") >= 0 && (c.indexOf("kits") >= 0 || c.indexOf("kit") >= 0)){ h = r; break; }
+  }
+  if (h < 0) return null;
+  const head = (rows[h] || []).map(v => String(v ?? "").trim().toLowerCase());
+  const cp = head.indexOf("package");
+  const ck = head.indexOf("kits") >= 0 ? head.indexOf("kits") : head.indexOf("kit");
+  const out = {};
+  for (let r = h + 1; r < rows.length; r++){
+    const row = rows[r] || [];
+    const pk = String(row[cp] ?? "").trim();
+    if (!pk) continue;
+    const n = +row[ck];
+    if (Number.isFinite(n) && n > 0) out[pk] = Math.round(n);
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 function parseDataset(sheets, fileName){
   const lotSheet  = sheets["貨批"] || sheets["lots"] || sheets["Lots"];
   const machSheet = sheets["機台"] || sheets["machines"] || sheets["Machines"];
@@ -1448,6 +1526,10 @@ function parseDataset(sheets, fileName){
       problems.push("能力矩陣裡 " + mx.blanks.join("、") + " 一個封裝都沒勾 → 視為全部都能測");
   }
 
+  // 配件（Kit 治具）套數
+  const kitSheet = sheets["配件"] || sheets["kits"] || sheets["Kits"];
+  const kits = kitSheet ? parseKits(kitSheet) : null;
+
   // 代號以檔案為準：貨批與機台出現過的都算，順序照第一次出現
   const pkgs = [], progs = [];
   const add = (a, v) => { if (v && !a.includes(v)) a.push(v); };
@@ -1465,7 +1547,26 @@ function parseDataset(sheets, fileName){
   if (orphan.length)
     problems.push("封裝 " + orphan.join("、") + " 沒有任何機台能測，這些批永遠做不完——請補上機台能力");
 
-  return { name: fileName, lots, machines, pkgs, progs, problems, orphan, capSource };
+  if (kits){
+    for (const k of Object.keys(kits))
+      if (!pkgs.includes(k)) problems.push("配件分頁的 " + k + " 在貨批與機台裡都沒出現過（已忽略）");
+    // 開局就超額：某封裝裝在太多台機上，多出來的先拆下來當空機
+    for (const pk of pkgs){
+      const lim = kits[pk];
+      if (!(lim > 0)) continue;
+      const hold = machines.filter(m => m.kit === pk);
+      if (hold.length > lim){
+        hold.slice(lim).forEach(m => { m.kit = null; });
+        problems.push("開局時有 " + hold.length + " 台機裝著 " + pk + "，但只有 " + lim
+                      + " 套 Kit → 多出來的 " + (hold.length - lim) + " 台當成空機");
+      }
+    }
+    const noKit = pkgs.filter(pk => lots.some(l => l.pkg === pk)
+                              && kits[pk] !== undefined && !(kits[pk] > 0));
+    if (noKit.length) problems.push("封裝 " + noKit.join("、") + " 的 Kit 套數是 0，這些批做不完");
+  }
+
+  return { name: fileName, lots, machines, pkgs, progs, problems, orphan, capSource, kits };
 }
 
 /* ---- 套用到參數：機台數、site 數、能力矩陣都以檔案為準 ---- */
@@ -1536,7 +1637,8 @@ function runToClear(policyId, seed){
     late: done.filter(l => l.due < NO_DUE && l.doneAt > l.due).length,
     util: utilization(),
     kit: sum(m => m.kitCh), prog: sum(m => m.progCh),
-    setup: sum(m => m.setup), wait: sum(m => m.wait), down: sum(m => m.down),
+    setup: sum(m => m.setup), wait: sum(m => m.wait), waitKit: sum(m => m.waitKit),
+    down: sum(m => m.down),
     curve
   };
   S = keep.S; rng = keep.rng; SILENT = keep.SILENT; A.policy = keep.pol; P.downPerHour = keep.down;
@@ -1566,7 +1668,8 @@ async function loadWipFile(file){
     $("#wipRun").style.display = "";
     $("#wipEng").value = Math.max(P.engineers, Math.ceil(ds.machines.length / 2.5));
     showWipSummary(ds);
-    st.innerHTML = "已載入。機台數、site 數、能力矩陣都改成檔案裡的設定；"
+    st.innerHTML = "已載入。機台數、site 數、機台能力、Kit 套數都以檔案為準"
+      + "（能力讀自 " + ds.capSource + "）；"
       + "工程師人數與改機時間仍沿用下方「背景參數」，可以改了再跑。";
   } catch(e){
     st.innerHTML = '<b style="color:var(--down)">讀取失敗：' + e.message + "</b>";
@@ -1590,6 +1693,10 @@ function showWipSummary(ds){
        ${cell(ds.machines.length + " 台機", "機隊 " + sites + " site")}
        ${cell(hhm(work / sites), "理論最短清空時間")}
        ${cell(nf(work/60) + " 機時", "純測試工時（1 site）")}
+       ${cell(ds.capSource.indexOf("矩陣") >= 0 ? "能力矩陣" : "can_packages", "機台能力讀自")}
+       ${cell(ds.kits ? ds.pkgs.reduce((a,p) => a + (ds.kits[p] > 0 ? ds.kits[p] : 0), 0) + " 套 Kit" : "不限量",
+              ds.kits ? ds.pkgs.filter(p => ds.kits[p] > 0).map(p => p + "×" + ds.kits[p]).join("・")
+                      : "檔案沒有「配件」分頁")}
      </tr></table>`
     + (ds.problems.length
         ? `<div class="adesc" style="color:var(--setup)">⚠ 檔案有 ${ds.problems.length} 個問題：<br>`
@@ -1641,6 +1748,7 @@ function showWipBench(acc, reps){
       late: avg(r.map(x => x.late)), util: avg(r.map(x => x.util)),
       kit: avg(r.map(x => x.kit)), prog: avg(r.map(x => x.prog)),
       setup: avg(r.map(x => x.setup)), wait: avg(r.map(x => x.wait)),
+      waitKit: avg(r.map(x => x.waitKit)),
       curve: r[0].curve };
   }).sort((a,b) => a.makespan - b.makespan);
   const best = rows[0].makespan, worst = rows[rows.length-1].makespan;
@@ -1649,7 +1757,7 @@ function showWipBench(acc, reps){
     `<table style="margin-top:10px"><tr>
        <th>排程法則</th><th>清空時間</th><th>比最快慢</th><th>比理論下限多</th>
        <th>完成批數</th><th>逾期批</th><th>稼動率</th>
-       <th>換 Kit</th><th>換程式</th><th>改機分鐘</th><th>等工程師分鐘</th>${reps>1?"<th>最差</th>":""}</tr>`
+       <th>換 Kit</th><th>換程式</th><th>改機分鐘</th><th>等工程師分鐘</th>${DATASET && DATASET.kits ? "<th>等 Kit 分鐘</th>" : ""}${reps>1?"<th>最差</th>":""}</tr>`
     + rows.map((r,i) => `<tr class="${i===0?"best":""}">
         <td>${r.p.name}</td>
         <td><b>${hhm(r.makespan)}</b></td>
@@ -1660,6 +1768,7 @@ function showWipBench(acc, reps){
         <td>${r.util.toFixed(1)}%</td>
         <td>${r.kit.toFixed(0)}</td><td>${r.prog.toFixed(0)}</td>
         <td>${nf(r.setup)}</td><td>${nf(r.wait)}</td>
+        ${DATASET && DATASET.kits ? `<td>${nf(r.waitKit)}</td>` : ""}
         ${reps>1?`<td>${hhm(r.worst)}</td>`:""}</tr>`).join("")
     + `</table>`
     + `<div class="adesc">理論最短 <b>${hhm(floor)}</b>（純測試工時 ÷ 機隊 site 數，零改機零當機）。
@@ -2008,7 +2117,8 @@ function endGame(){
     for (const g of m.segs) tot[g.c] += g.b - g.a;
   const totAll = Math.max(1, Object.values(tot).reduce((a,b) => a+b, 0));
   const MIXNAME = { RUN:"測試", RT:"Retest", SETUP:"改機", DOWN:"當機",
-                    WAITSET:"等工程師(改機)", WAITFIX:"等工程師(維修)", IDLE:"閒置" };
+                    WAITSET:"等工程師(改機)", WAITFIX:"等工程師(維修)",
+                    WAITKIT:"等 Kit", IDLE:"閒置" };
   $("#ovTimeline").innerHTML =
     `<h3>當天各機台稼動時間軸（00:00 → 24:00）</h3>`
     + S.machines.map(m => `<div class="ovrow">

@@ -85,6 +85,8 @@ C.add_matrix(OUT, [dict(zip(["id","pkg","prog","qty","tpu","arrive","due","hot",
                    for l in lots],
              [dict(zip(["id","sites","kit","prog","can","avail"], m)) for m in machines],
              PKG_NAMES)
+# 配件：套數比照現場現在裝著的台數，等於「治具剛好夠、不會卡」的基準情境
+C.add_kits(OUT, PKG_NAMES, {"QFN48": 9, "QFN32": 6, "SOP16": 5, "TSSOP28": 3, "BGA144": 2})
 print("lots=%d machines=%d" % (len(lots), len(machines)))
 tot = sum(l[3]*l[4] for l in lots)
 print("總顆數 %d，純測試工時(1 site) %.1f h，機隊 %d site，理論最短 %.2f h"

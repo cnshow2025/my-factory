@@ -257,3 +257,31 @@ def add_matrix(path, lots, machines, pkgs, example=False):
     ws.freeze_panes = "C2"
     ws.row_dimensions[1].height = 22
     wb.save(path)
+
+
+def add_kits(path, pkgs, kits):
+    """加一頁「配件」：每種封裝有幾套 Kit 治具。空白或整頁刪掉 ＝ 不限量。"""
+    from openpyxl import load_workbook
+    wb = load_workbook(path)
+    ws = wb.create_sheet("配件")
+    ws.sheet_view.showGridLines = False
+    _hdr(ws, 1, ["package", "kits"])
+    for i, p in enumerate(pkgs):
+        _put(ws, 2 + i, [p, kits.get(p)])
+        c = ws.cell(row=2 + i, column=2)
+        c.alignment = Alignment(horizontal="center")
+        c.fill = PatternFill("solid", fgColor="FFF6D6")      # 黃底＝要你填的格子
+    notes = [
+        "每種封裝有幾套 Kit 治具 —— 同一時間最多只有這麼多台機能裝著它。",
+        "留白 ＝ 這種封裝的治具不限量；整頁刪掉 ＝ 全部都不限量（跟舊版行為一樣）。",
+        "機台想換到某個 Kit，但該封裝的治具都在別台機上時，它會停下來等，",
+        "時間軸上會顯示為「等 Kit」（灰色），跑分表也會多一欄「等 Kit 分鐘」。",
+        "閒置且待接區沒有同封裝批的機台，身上的治具會被搬走給需要的機台（比照現場實務）。",
+        "開局時如果裝著某封裝的機台數超過套數，多出來的會被當成空機。",
+    ]
+    for j, t in enumerate(notes):
+        ws.cell(row=len(pkgs) + 3 + j, column=1, value=t).font = Font(name=F, size=10, color=GREY)
+    ws.column_dimensions["A"].width = 16
+    ws.column_dimensions["B"].width = 10
+    ws.row_dimensions[1].height = 22
+    wb.save(path)
