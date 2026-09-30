@@ -188,4 +188,15 @@ hbar(mk("c_switch",1180,500),{title:"切換訊號：改機＋等工程師吃掉�
  values:[46.6,43.3,36.9,35.8,35.8,31.7,30.9,23.8,15.4,10.4,7.7],
  unit:"%", pl:290, dec:1, max:52, ref:33.7, refLabel:"≈ 33%",
  colors:[WARN,WARN,WARN,WARN,WARN,GOOD,GOOD,GOOD,GOOD,GOOD,GOOD]});
+
+/* ===== 配件（Kit 治具）套數 ===== */
+vbar(mk("c_kit",640,400),{title:"治具套數會換掉冠軍：清空 200 批（小時）",
+ labels:["治具不限量\n（原本的假設）","沒有備品\n套數＝現在裝著的台數","每種只有 2 套"],
+ values:[14.5,11.1,18.4], series2:[9.7,11.4,26.3],
+ names:["省改機優先","大批給快機"], color:WARN, color2:GOOD, min:0, max:31, dec:1});
+
+hbar(mk("c_kitdelta",640,400),{title:"「沒有備品」讓各法則多花多久（小時）",
+ labels:["最早交期 EDD","到貨順序 FIFO","大批給快機","加權綜合","急件優先→交期","最短工時 SPT","省改機優先"],
+ values:[15.6,2.5,1.7,0.5,-0.5,-2.3,-3.4], unit:" h", pl:170, dec:1, max:18,
+ colors:[BAD,WARN,WARN,WARN,TEAL,TEAL,GOOD]});
 </script>
