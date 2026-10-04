@@ -333,12 +333,12 @@
           </div>
           <div class="adesc" id="polDesc"></div>
           <div class="arow">
-            <span style="color:var(--dim)">Composite 權重</span>
-            <label>交期 <input type="range" id="wDue" min="0" max="3" step="0.1" value="1"><span class="wv" id="vDue">1</span></label>
-            <label>省改機 <input type="range" id="wSetup" min="0" max="3" step="0.1" value="1"><span class="wv" id="vSetup">1</span></label>
-            <label>短批優先 <input type="range" id="wSpt" min="0" max="3" step="0.1" value="0.5"><span class="wv" id="vSpt">0.5</span></label>
-            <label>HOT <input type="range" id="wHot" min="0" max="10" step="0.5" value="3"><span class="wv" id="vHot">3</span></label>
-            <label>大批給快機 <input type="range" id="wSpeed" min="0" max="3" step="0.1" value="1"><span class="wv" id="vSpeed">1</span></label>
+            <span style="color:var(--dim)" title="各因子先標準化成 0~1，再乘權重相加（對齊 Prototype 規格書的 100 分制）">Composite 權重（分）</span>
+            <label>交期 <input type="range" id="wDue" min="0" max="50" step="1" value="25"><span class="wv" id="vDue">25</span></label>
+            <label>HOT <input type="range" id="wHot" min="0" max="50" step="1" value="15"><span class="wv" id="vHot">15</span></label>
+            <label>省改機 <input type="range" id="wSetup" min="0" max="50" step="1" value="20"><span class="wv" id="vSetup">20</span></label>
+            <label>短批優先 <input type="range" id="wSpt" min="0" max="50" step="1" value="5"><span class="wv" id="vSpt">5</span></label>
+            <label>大批給快機 <input type="range" id="wSpeed" min="0" max="50" step="1" value="10"><span class="wv" id="vSpeed">10</span></label>
           </div>
           <div class="arow">
             <span style="color:var(--dim)">自動派工行為</span>
@@ -349,6 +349,7 @@
               <option value="3">3</option>
             </select></label>
             <label><input type="checkbox" id="preSw" checked> 允許 HOT 插單</label>
+            <label title="空機要接一批之前，先看有沒有另一台（已經裝著它的 Kit、或快得多）會更早做完；會的話留給那台，自己改接別批"><input type="checkbox" id="pairSw" checked> 配對派工（等更快做完的機台）</label>
           </div>
           <div class="arow">
             <span style="color:var(--dim)">批次跑分</span>
@@ -1171,8 +1172,8 @@ function render(){
 }
 
 /* ---------- 排程演算法 ---------- */
-const A = { mode:"manual", policy:"edd", queueDepth:1, preempt:true,
-            wDue:1, wSetup:1, wSpt:0.5, wHot:3, wSpeed:1, days:20, seed:1 };
+const A = { mode:"manual", policy:"edd", queueDepth:1, preempt:true, pair:true,
+            wDue:25, wHot:15, wSetup:20, wSpt:5, wSpeed:10, days:20, seed:1 };
 
 // 這批貨在機台上的預估佔機時間（T1 + retest 餘裕）
 function estMin(lot){
@@ -1181,12 +1182,35 @@ function estMin(lot){
 // 餘裕：現在接這批，離交期還剩多少緩衝（負值＝已經來不及）
 function slackMin(lot){ return lot.due - S.t - estMin(lot); }
 
+// Composite：每個因子先壓成 0~1，再乘權重（分）相加——和 Prototype 規格書的 100 分制同一種算法，
+// 這裡驗證過的權重可以直接搬進正式派工系統。
+const DUE_HORIZON = 24 * 60;   // 交期緊迫度的尺：餘裕還有 24 小時以上算 0 分，餘裕用完算滿分
+const clamp01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
+let normCache = { S:null, t:-1 };
+// 標準化要用到的「現在 WIP 裡最長的工時」與「機隊速度範圍」，同一分鐘內只算一次
+function compositeNorm(){
+  if (normCache.S === S && normCache.t === S.t) return normCache;
+  let estMax = 1;
+  for (const l of S.lots) if (l.state === "WIP") estMax = Math.max(estMax, estMin(l));
+  let spMin = Infinity, spMax = -Infinity;
+  for (const m of S.machines){ spMin = Math.min(spMin, m.speed); spMax = Math.max(spMax, m.speed); }
+  normCache = { S, t:S.t, estMax, spMin, spMax };
+  return normCache;
+}
+function compositeFactors(lot, m){
+  const c = compositeNorm(), est = estMin(lot);
+  return {
+    due:   lot.due >= NO_DUE ? 0 : clamp01(1 - slackMin(lot) / DUE_HORIZON),   // 餘裕越少越高
+    hot:   lot.hot ? 1 : 0,
+    setup: clamp01(1 - tailCost(m, lot) / Math.max(1, P.setupPkg)),             // 免改機 1、換程式約 0.5、換 Kit 0
+    spt:   clamp01(1 - est / c.estMax),                                          // 越短越高
+    // 大批給快機：這批的工時占比 × 這台在機隊裡的速度排名；慢機上大批拿 0，快機上大批拿 1
+    speed: (c.spMax > c.spMin ? (m.speed - c.spMin) / (c.spMax - c.spMin) : 0) * (est / c.estMax)
+  };
+}
 function compositeScore(lot, m){
-  return A.wDue   * (-slackMin(lot) / 60)
-       + A.wHot   * (lot.hot ? 1 : 0)
-       - A.wSetup * (tailCost(m, lot) / 60)
-       - A.wSpt   * (estMin(lot) / 60)
-       + A.wSpeed * ((1 - fleetSpeed()/m.speed) * estMin(lot) / 60);  // 放這台能省下的工時
+  const f = compositeFactors(lot, m);
+  return A.wDue * f.due + A.wHot * f.hot + A.wSetup * f.setup + A.wSpt * f.spt + A.wSpeed * f.speed;
 }
 const POLICIES = [
   { id:"fifo",  name:"FIFO 到貨順序",     desc:"誰先到誰先做。最單純的基準線，完全不看交期與改機。",
@@ -1202,7 +1226,7 @@ const POLICIES = [
   { id:"speed", name:"Speed-aware 大批給快機",
     desc:"用「這批放這台能省多少分鐘」評分：快機優先接大批、慢機接小批，同分再比交期。",
     score:(l, m) => (1 - fleetSpeed()/m.speed) * estMin(l) - l.due / 1000 },
-  { id:"comp",  name:"Composite 加權",     desc:"交期緊迫度、改機成本、批量大小、HOT 四個因子加權評分，權重可調。",
+  { id:"comp",  name:"Composite 加權",     desc:"交期、HOT、省改機、短批、大批給快機五個因子各標準化成 0~1 後乘權重相加（預設 25/15/20/5/10 分，同 Prototype 規格書的 100 分制），權重可調。",
     score:(l, m) => compositeScore(l, m) }
 ];
 function policyById(id){ return POLICIES.find(p => p.id === id) || POLICIES[1]; }
@@ -1244,24 +1268,78 @@ function autoPreempt(){
     preempt(victim, h);
   }
 }
+// 這批放在這台要測多久（用這台的速度，含 retest 餘裕）
+function estOn(lot, m){ return Math.max(1, Math.ceil(lot.qty * lot.tpu / 60 / m.speed * 1.3)); }
+// 這台什麼時候才空得出來：還沒開放、現批剩餘（T1 再加 retest 餘裕）、改機剩餘、排在後面的預約都算進去
+function freeAt(m){
+  let t = Math.max(S.t, m.readyAt || 0);
+  if (m.state === "SETUP"){ t += m.remain; if (m.lot) t += estOn(m.lot, m); }
+  else if (m.lot){ t += m.remain; if (m.phase === "T1") t += Math.ceil(phaseMinutes(m.lot, m.lot.qty, m) * 0.3); }
+  if (m.queue.length){
+    let cfg = m.lot ? { pkg:m.lot.pkg, prog:m.lot.prog } : m.target ? m.target : { pkg:m.kit, prog:m.prog };
+    for (const q of m.queue){
+      t += (cfg.pkg !== q.pkg ? P.setupPkg : cfg.prog !== q.prog ? P.setupProg : 0) + estOn(q, m);
+      cfg = q;
+    }
+  }
+  return t;
+}
+// 這批在這台的預計完工：等它空出來（free）→ 改機 → 測完
+function finishOn(m, lot, free){ return free + tailCost(m, lot) + estOn(lot, m); }
+// 配對派工：這台現在接這批，會不會比「等另一台空出來」還慢？會的話回傳那台，這批留給它，自己改接別批。
+// 這就是 Benchmark §8 的例子——T01 空著但要改機 60 分，T02 30 分後空且免改機，該派 T02。
+// 三個條件缺一不可：① 那台空出來時，依同一套法則「自己也會挑這批」（不然等了白等）；
+// ② 那台接得下——空機，或待接區還有位子（位子已被別批押走的機台，等它等於等不到）；
+// ③ 那台不是當機中。等多久不另設上限：預計完工比較早，等的時間自然不會超過省下的改機＋測試時間。
+function betterElsewhere(m, lot, free, xBest, depth){
+  const mine = finishOn(m, lot, free[m.id]);
+  let best = null, bt = mine;
+  for (const x of S.machines){
+    if (x === m || x.state === "DOWN" || !canRun(x, lot.pkg)) continue;
+    if (heldKit(x) !== lot.pkg && !kitAvailable(x, lot.pkg)) continue;
+    const idle = ready(x) && x.state === "IDLE" && !x.lot;
+    if (!idle && depth > 0 && x.queue.length >= depth) continue;
+    if (xBest(x) !== lot) continue;
+    const t = finishOn(x, lot, free[x.id]);
+    if (t < bt){ bt = t; best = x; }
+  }
+  return best;
+}
 function autoDispatch(){
   const pol = policyById(A.policy);
+  // 當機的機台不該再押著貨：待接批退回 WIP，讓別台接手（事件驅動重排）
+  for (const m of S.machines){
+    if (m.state !== "DOWN" || !m.queue.length) continue;
+    const ids = m.queue.map(l => l.id).join("、");
+    for (const l of m.queue){ l.state = "WIP"; l.machine = null; }
+    m.queue.length = 0;
+    log("↩ " + m.name + " 當機，待接批退回 WIP 重派（" + ids + "）");
+  }
   let wip = S.lots.filter(l => l.state === "WIP");
   if (wip.length){
-    for (const m of S.machines){
-      if (ready(m) && m.state === "IDLE" && !m.lot && wip.length){
-        const best = pickBest(wip.filter(l => canRun(m, l.pkg) && kitAvailable(m, l.pkg)), m, pol);
-        if (best){ assign(m, best); wip = wip.filter(l => l !== best); }
-      }
-    }
     const depth = Math.min(A.queueDepth, P.queueMax);
-    for (const m of S.machines){
-      if (!ready(m)) continue;
-      while (m.queue.length < depth && wip.length){
-        const best = pickBest(wip.filter(l => canRun(m, l.pkg) && kitAvailable(m, l.pkg)), m, pol);
-        if (!best) break;
-        enqueue(m, best); wip = wip.filter(l => l !== best);
+    const pool = m => wip.filter(l => canRun(m, l.pkg) && kitAvailable(m, l.pkg));
+    // 配對派工用：每台的空出時間，以及每台「空出來時自己會挑的批」（wip 一變就重算）
+    const free = A.pair ? S.machines.map(freeAt) : null;
+    let bestFor = new Map();
+    const xBest = x => { if (!bestFor.has(x.id)) bestFor.set(x.id, pickBest(pool(x), x, pol)); return bestFor.get(x.id); };
+    // 讓 m 接一批：依法則挑最好的；若留給別台更划算就跳過它再挑下一個。接到回 true。
+    const take = (m, act) => {
+      let cands = pool(m);
+      while (cands.length){
+        const best = pickBest(cands, m, pol);
+        if (free && betterElsewhere(m, best, free, xBest, depth)){ cands = cands.filter(l => l !== best); continue; }
+        act(m, best); wip = wip.filter(l => l !== best);
+        if (free){ free[m.id] = freeAt(m); bestFor = new Map(); }
+        return true;
       }
+      return false;
+    };
+    for (const m of S.machines)
+      if (ready(m) && m.state === "IDLE" && !m.lot && wip.length) take(m, assign);
+    for (const m of S.machines){
+      if (!ready(m) || m.state === "DOWN") continue;     // 當機中不收預約
+      while (m.queue.length < depth && wip.length && take(m, enqueue)){}
     }
   }
   if (A.preempt) autoPreempt();
@@ -2444,6 +2522,7 @@ function buildAlgo(){
   w("#wSpt","wSpt","#vSpt"); w("#wHot","wHot","#vHot"); w("#wSpeed","wSpeed","#vSpeed");
   $("#qDepth").onchange = e => A.queueDepth = +e.target.value;
   $("#preSw").onchange  = e => A.preempt = e.target.checked;
+  $("#pairSw").onchange = e => A.pair = e.target.checked;
   $("#daysIn").onchange = e => A.days = +e.target.value;
   $("#runBench").onclick = runBatch;
   $("#runRatio").onclick = runRatioBench;
