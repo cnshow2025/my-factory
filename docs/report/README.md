@@ -57,7 +57,9 @@ python3 audit.py               # 需要 python-pptx
 第 2～9 頁（日模式、20 個模擬日平均）的原始結果在 `report_data.json`：`base`／`policies`／`depth`／`eng`／
 `dedicate`／`levers`／`ratio`，產生方式是套用「我的工廠」參數組、`A.queueDepth = 0`、`A.policy = "setup"`、
 10 位工程師，再逐項改單一變數跑 20 天。第 9 頁的 A→E 路徑是另外五組設定（EDD＋預押 1 批＋8 人 → 逐步加入四項建議）。
-模型校準（第 3 頁）是在原派工下完成的；換成配對派工後基準情境的換 Kit 由 39～44 次降到 35 次，參數沒有重新校準。
+模型校準（第 3 頁）在配對派工下重做過：配對派工本來就少換 Kit，原本「5 台彈性＋20 台專用」只剩 35 次／日，
+改成「8 台彈性＋17 台專用」、當機率 11.5% → 13.5%／機時後，基準情境換 Kit 49 次／日、當機÷換 Kit 1.50，三項與實測對上
+（參數組 `我的工廠` 已同步改掉）。
 
 蒐集第 10～14 頁資料的腳本邏輯：載入資料檔 → `DET = true`、`A.pair = true`、`A.queueDepth = 1` → 對每個工程師人數
 呼叫 `runToClear(policyId, 1)` 取 makespan／setup／wait／curve。

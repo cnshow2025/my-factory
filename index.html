@@ -2247,10 +2247,10 @@ const PRESETS = [
     desc:"現場條件：5 台測試機、封裝 5 種、測試程式 8 種、單顆 2 秒、" +
          "批量結構 小批 0.5~2k 六成／中批 2~10k 三成／大批 10~25k 一成、" +
          "換 Kit 60 分、換程式 30 分、良率 80~99%、RT 門檻 99/98、一天 24 小時三班。" +
-         "當機率 11.5%/小時（校準到維修工時約為改機的 1.5 倍）、修復 10~120 分、" +
+         "當機率 13.5%/小時（校準到當機次數約為換 Kit 的 1.5 倍）、修復 10~120 分、" +
          "Retest 救回率 60%、HOT 比例 10%、逾期一批扣 20,000 分、產品集中度 50%。" +
          "機隊 25 台：5 台 8 site、10 台 4 site、10 台 2 site（等效 100 site、平均 4）。" +
-         "能力配置：5 台彈性支援全封裝 + 20 台各專用一種，校準到一天約 50 次換 Kit。" +
+         "能力配置：8 台彈性支援全封裝 + 17 台各專用一種，校準到一天約 50 次換 Kit。" +
          "要手動玩可把機台數改小；人機比跑分請用 25 台。",
     P:Object.assign({}, DEF, {
       machines:25, engineers:10, engForProg:1, setupPkg:60, setupProg:30,
@@ -2258,7 +2258,7 @@ const PRESETS = [
       pkgTypes:5, progTypes:8,
       yieldMin:80, yieldMax:99, gate1:99, gate2:98,
       recoverMin:40, recoverMax:80,
-      downPerHour:11.5, downMin:10, downMax:120,
+      downPerHour:13.5, downMin:10, downMax:120,
       recoverMin:60, recoverMax:60,
       repeatRate:50, mixSmall:60, mixMid:30,
       qtySmallMin:500, qtySmallMax:2000,
@@ -2268,9 +2268,10 @@ const PRESETS = [
       arrivalEvery:4, arrivalBatch:1, initialLots:30,
       hotRate:10, hotBonus:1.5, latePenalty:20000,
       queueMax:4, realSeconds:300,
-      // 5 台彈性支援全部封裝，20 台各專用一種：校準到現場「一天約 50 次換 Kit」
-      cap:["ABCDE","ABCDE","ABCDE","ABCDE","ABCDE",
-           "A","B","C","D","E", "A","B","C","D","E", "A","B","C","D","E", "A","B","C","D","E"]
+      // 8 台彈性支援全部封裝，17 台各專用一種：校準到現場「一天約 50 次換 Kit」
+      // （配對派工本來就少換 Kit，5 台彈性只剩 35 次；拉到 8 台才回到 48～50 次）
+      cap:["ABCDE","ABCDE","ABCDE","ABCDE","ABCDE","ABCDE","ABCDE","ABCDE",
+           "A","B","C","D","E", "A","B","C","D","E", "A","B","C","D","E", "A","B"]
     }) }
 ];
 const LS_KEY = "myfactory.preset.myfab";
